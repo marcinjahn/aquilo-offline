@@ -1,0 +1,76 @@
+//! Device/tank configuration. Everything device-specific lives here rather than
+//! in source, so the binary is generic and shareable (PRD: Configuration).
+
+use serde::Deserialize;
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct Config {
+    /// Receiver/gateway id (`<rid>`); all topics are templated from it.
+    pub receiver_id: String,
+    /// Radio sensor-node id reported inside `/state`.
+    pub sensor_id: String,
+    /// Fixed MQTT credentials the device's firmware connects with.
+    pub mqtt_user: String,
+    pub mqtt_pass: String,
+    /// Firmware string echoed back on `/version/...` so no OTA is triggered.
+    pub firmware_version: String,
+    /// Display name for the sensor in `/state`.
+    pub sensor_name: String,
+
+    #[serde(default = "defaults::radar_skip")]
+    pub radar_skip: i64,
+    #[serde(default = "defaults::radar_repeat")]
+    pub radar_repeat: i64,
+
+    #[serde(default = "defaults::bind_addr")]
+    pub bind_addr: String,
+    #[serde(default = "defaults::listen_port")]
+    pub listen_port: u16,
+    #[serde(default = "defaults::ping_interval_secs")]
+    pub ping_interval_secs: u64,
+
+    /// Seed values for the retained `/state` published before the first reading.
+    pub state: StateSeed,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct StateSeed {
+    /// Raw radar level (cm) of the last known reading.
+    pub lvl: f64,
+    pub pct: i64,
+    pub bat: i64,
+    pub days_left: i64,
+    pub lvl_to_full: i64,
+    /// Last pump-out timestamp (RFC3339).
+    pub lst_empty: String,
+    #[serde(default = "defaults::from")]
+    pub from: String,
+}
+
+impl Config {
+    pub fn load(path: &str) -> anyhow::Result<Config> {
+        let text = std::fs::read_to_string(path)?;
+        Ok(toml::from_str(&text)?)
+    }
+}
+
+mod defaults {
+    pub fn radar_skip() -> i64 {
+        9
+    }
+    pub fn radar_repeat() -> i64 {
+        9
+    }
+    pub fn bind_addr() -> String {
+        "0.0.0.0".to_string()
+    }
+    pub fn listen_port() -> u16 {
+        1883
+    }
+    pub fn ping_interval_secs() -> u64 {
+        1200
+    }
+    pub fn from() -> String {
+        "node-4".to_string()
+    }
+}

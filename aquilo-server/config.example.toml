@@ -1,0 +1,27 @@
+# Aquilo offline server config. Copy to config.toml and fill in your device's
+# values (learn mode will write this for you in a later phase). All topics are
+# templated from receiver_id.
+
+receiver_id = "ae83fc"          # the receiver/gateway id (<rid>)
+sensor_id = "ae5058"            # the radio sensor-node id seen in /state
+mqtt_user = "ae83fc"            # fixed MQTT username from the firmware
+mqtt_pass = "00000000"          # fixed MQTT password from the firmware
+firmware_version = "1.7.1.9_sh_en"  # echoed back so the device never tries an OTA
+sensor_name = "ae5058"          # display name in /state
+
+radar_skip = 9
+radar_repeat = 9
+
+bind_addr = "0.0.0.0"
+listen_port = 1883
+ping_interval_secs = 1200        # app-level /ping cadence (~20 min)
+
+# Seed values for the retained /state published before the first live reading.
+[state]
+lvl = 150.2
+pct = 20
+bat = 83
+days_left = 51
+lvl_to_full = 110
+lst_empty = "2026-05-30T00:17:19+02:00"
+from = "node-4"

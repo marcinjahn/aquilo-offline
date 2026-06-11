@@ -1,0 +1,15 @@
+[req]
+distinguished_name = dn
+x509_extensions = ext
+prompt = no
+[dn]
+CN = *.iot.us-east-1.amazonaws.com
+[ext]
+subjectAltName = @alt
+[alt]
+DNS.1 = *.credentials.iot.us-east-1.amazonaws.com
+DNS.2 = c2n0py5cened4k.credentials.iot.us-east-1.amazonaws.com
+DNS.3 = *.iot.us-east-1.amazonaws.com
+DNS.4 = *.elb.us-east-1.amazonaws.com
+DNS.5 = public-ethos501-prod-va6-d20a6746fffd84dd.elb.us-east-1.amazonaws.com
+DNS.6 = *.amazonaws.com

@@ -1,0 +1,13 @@
+{
+  "name": "aquilo-capture",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Logging MQTT broker to capture how the Aquilo sensor talks to mqtt.aquilo.cloud",
+  "type": "commonjs",
+  "scripts": {
+    "broker": "node broker.js"
+  },
+  "dependencies": {
+    "aedes": "^0.51.3"
+  }
+}

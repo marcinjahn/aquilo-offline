@@ -1,0 +1,22 @@
+receiver_id = "ae83fc"
+sensor_id = "ae5058"
+mqtt_user = "ae83fc"
+mqtt_pass = "48007129"
+firmware_version = "1.7.1.9_sh_en"
+sensor_name = "ae5058"
+
+radar_skip = 9
+radar_repeat = 9
+
+bind_addr = "0.0.0.0"
+listen_port = 1883
+ping_interval_secs = 1200
+
+[state]
+lvl = 150.2
+pct = 20
+bat = 83
+days_left = 51
+lvl_to_full = 110
+lst_empty = "2026-05-30T00:17:19+02:00"
+from = "node-4"
