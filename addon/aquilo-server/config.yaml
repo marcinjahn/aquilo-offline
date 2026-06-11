@@ -1,0 +1,58 @@
+name: Aquilo offline server
+version: "0.1.0"
+slug: aquilo_server
+description: >-
+  Local stand-in for the Aquilo vendor cloud. Keeps the receiver connected to
+  your Mosquitto broker and republishes the computed retained /state, so the
+  device's own HTTP /state keeps working with the internet cut.
+url: https://github.com/CHANGE_ME/aquilo-server/tree/main/addon/aquilo-server
+# Prebuilt multi-arch images published to GHCR (see .github/workflows/addon.yml).
+# Replace CHANGE_ME with your GitHub owner; the tag tracks `version` above.
+image: ghcr.io/CHANGE_ME/{arch}-aquilo-server
+arch:
+  - aarch64
+  - amd64
+  - armv7
+init: false
+# Start after the broker; auto-start and let the Supervisor restart us on crash.
+boot: auto
+startup: services
+# The device's connection and retained messages live in Mosquitto; we connect to
+# it as a client using the auto-provided MQTT service credentials.
+services:
+  - mqtt:want
+# State (history, lstEmpty, last computed /state) lives in /data. `cold` makes the
+# Supervisor stop the add-on while /data is archived, so any Home Assistant backup
+# that includes this add-on captures a consistent snapshot (and the options ride
+# along automatically). Restoring it on a fresh host brings history + calibration back.
+backup: cold
+options:
+  receiver_id: ""
+  sensor_id: ""
+  sensor_name: ""
+  mqtt_user: ""
+  mqtt_pass: ""
+  firmware_version: "1.7.1.9_sh_en"
+  full_dist: 40.0
+  empty_dist: 178.0
+  radar_skip: 9
+  radar_repeat: 9
+  ping_interval_secs: 1200
+  history_max_len: 500
+  pump_out_drop_pct: 25
+  log_level: info
+schema:
+  receiver_id: str
+  sensor_id: str
+  sensor_name: str
+  mqtt_user: str
+  mqtt_pass: password
+  firmware_version: str
+  full_dist: float
+  empty_dist: float
+  radar_skip: int(0,)
+  radar_repeat: int(0,)
+  ping_interval_secs: int(1,)
+  history_max_len: int(1,)
+  pump_out_drop_pct: int(1,100)
+  log_level: list(trace|debug|info|warning|error)

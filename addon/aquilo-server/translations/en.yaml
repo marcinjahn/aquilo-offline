@@ -1,0 +1,43 @@
+configuration:
+  receiver_id:
+    name: Receiver ID
+    description: Receiver/gateway id (<rid>). All MQTT topics derive from it. Recover it with the learn/observe onboarding if unknown.
+  sensor_id:
+    name: Sensor ID
+    description: Radio sensor-node id reported inside /state.
+  sensor_name:
+    name: Sensor name
+    description: Display name shown for the sensor in /state.
+  mqtt_user:
+    name: Device MQTT username
+    description: The device's fixed MQTT username (usually the receiver id). Add this same login to the Mosquitto add-on.
+  mqtt_pass:
+    name: Device MQTT password
+    description: The device's fixed MQTT password. Add this same login to the Mosquitto add-on.
+  firmware_version:
+    name: Firmware version
+    description: Echoed back to the device so it never attempts an OTA update.
+  full_dist:
+    name: Full distance (cm)
+    description: Radar distance to the surface when the tank is full. Smaller = fuller. Drives pct and lvlToFull.
+  empty_dist:
+    name: Empty distance (cm)
+    description: Radar distance to the surface when the tank is empty.
+  radar_skip:
+    name: Radar skip
+    description: Radar/radio parameter published to the sensor node.
+  radar_repeat:
+    name: Radar repeat
+    description: Radar/radio parameter published to the sensor node.
+  ping_interval_secs:
+    name: Ping interval (seconds)
+    description: Cadence of the app-level /ping keepalive (~20 min default).
+  history_max_len:
+    name: History length
+    description: Rolling reading-history cap backing the days-left projection; oldest dropped past this.
+  pump_out_drop_pct:
+    name: Pump-out drop (%)
+    description: Fall in fullness (percentage points) between readings that counts as a pump-out and resets lstEmpty.
+  log_level:
+    name: Log level
+    description: Add-on log verbosity.

@@ -23,6 +23,15 @@ use crate::clock;
 use crate::config::Config;
 use crate::topics::Topics;
 
+/// Resolved broker connection for the `serve` client, from either the configured
+/// external broker or the in-process one.
+struct BrokerConn {
+    host: String,
+    port: u16,
+    user: String,
+    pass: String,
+}
+
 /// The evolving server state. Only the serve loop touches it.
 struct Runtime {
     /// The current computed `/state` (seeded, then updated on each reading).
@@ -34,7 +43,30 @@ struct Runtime {
 }
 
 pub async fn run(cfg: Config) -> Result<()> {
-    broker::spawn(&cfg)?;
+    // Two deployments share this loop: with an external broker configured (the HA
+    // Mosquitto add-on) we connect as a plain client; otherwise we run our own
+    // in-process broker and connect to it on loopback (standalone Docker / dev).
+    let conn = match &cfg.broker {
+        Some(b) => {
+            info!(host = %b.host, port = b.port, "connecting to external broker (no embedded broker)");
+            BrokerConn {
+                host: b.host.clone(),
+                port: b.port,
+                user: b.username.clone(),
+                pass: b.password.clone(),
+            }
+        }
+        None => {
+            broker::spawn(&cfg)?;
+            BrokerConn {
+                host: "127.0.0.1".to_string(),
+                port: cfg.listen_port,
+                user: broker::INTERNAL_USER.to_string(),
+                pass: broker::INTERNAL_PASS.to_string(),
+            }
+        }
+    };
+
     let topics = Topics::new(&cfg.receiver_id);
     let battery = BatteryCurve::default();
     let store = JsonFileStore::in_dir(&cfg.data_dir);
@@ -46,10 +78,10 @@ pub async fn run(cfg: Config) -> Result<()> {
 
     let mut opts = MqttOptions::new(
         format!("aquilo-server-{}", cfg.receiver_id),
-        "127.0.0.1",
-        cfg.listen_port,
+        conn.host,
+        conn.port,
     );
-    opts.set_credentials(broker::INTERNAL_USER, broker::INTERNAL_PASS);
+    opts.set_credentials(conn.user, conn.pass);
     opts.set_keep_alive(Duration::from_secs(30));
 
     let (client, mut eventloop) = AsyncClient::new(opts, 64);
@@ -383,6 +415,7 @@ mod tests {
             history_max_len: 500,
             pump_out_drop_pct: 25,
             calibration: Calibration::default(),
+            broker: None,
             state: StateSeed {
                 lvl: 150.2,
                 pct: 20,

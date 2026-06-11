@@ -1,0 +1,65 @@
+name: Build add-on images
+
+# Builds the multi-arch add-on images from the repository-root context and pushes
+# them to GHCR as ghcr.io/<owner>/<arch>-aquilo-server:<version>. The Home
+# Assistant Supervisor pulls these via `image:` in addon/aquilo-server/config.yaml.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "aquilo-core/**"
+      - "aquilo-store/**"
+      - "aquilo-server/**"
+      - "Cargo.*"
+      - "addon/aquilo-server/**"
+      - ".github/workflows/addon.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+          - arch: aarch64
+            platform: linux/arm64
+          - arch: armv7
+            platform: linux/arm/v7
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read add-on version
+        id: meta
+        run: |
+          version=$(grep '^version:' addon/aquilo-server/config.yaml | head -1 | sed -E 's/version:[[:space:]]*"?([^"]+)"?/\1/')
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: addon/aquilo-server/Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: true
+          build-args: |
+            BUILD_FROM=ghcr.io/home-assistant/${{ matrix.arch }}-base-debian:bookworm
+          tags: |
+            ghcr.io/${{ steps.meta.outputs.owner }}/${{ matrix.arch }}-aquilo-server:${{ steps.meta.outputs.version }}
+            ghcr.io/${{ steps.meta.outputs.owner }}/${{ matrix.arch }}-aquilo-server:latest

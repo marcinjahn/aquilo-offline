@@ -18,6 +18,17 @@ bind_addr = "0.0.0.0"
 listen_port = 1883
 ping_interval_secs = 1200        # app-level /ping cadence (~20 min)
 
+# Broker. Omit this section to run the embedded rumqttd broker (standalone Docker
+# / dev): the device connects here directly with mqtt_user/mqtt_pass. Set it to
+# connect as a CLIENT to an existing broker instead — the Home Assistant Mosquitto
+# add-on does this, with these being the server's own login (the device keeps using
+# mqtt_user/mqtt_pass against Mosquitto). The HA add-on fills this in automatically.
+# [broker]
+# host = "core-mosquitto"
+# port = 1883
+# username = "addons"
+# password = "..."
+
 # Persistence. The state file (history, lstEmpty baseline, last computed state,
 # cached calibration) lives here and is re-seeded on startup so a reboot leaves a
 # valid /state immediately. The HA add-on points this at its /data volume.

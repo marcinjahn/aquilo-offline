@@ -29,6 +29,7 @@ fn test_config(data_dir: &str) -> Config {
         history_max_len: 500,
         pump_out_drop_pct: 25,
         calibration: Calibration::default(),
+        broker: None,
         state: StateSeed {
             lvl: 150.2,
             pct: 20,
