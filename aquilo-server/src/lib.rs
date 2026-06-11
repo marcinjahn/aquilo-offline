@@ -6,5 +6,7 @@
 pub mod broker;
 pub mod clock;
 pub mod config;
+pub mod mqtt_wire;
+pub mod onboard;
 pub mod server;
 pub mod topics;
