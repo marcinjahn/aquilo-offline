@@ -5,19 +5,20 @@
 use std::time::Duration;
 
 use anyhow::Result;
+use aquilo_core::{BatteryCurve, Reading, SensorState, StaticFields};
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, Publish, QoS};
 use serde_json::json;
 use tracing::{debug, info, warn};
 
 use crate::broker;
+use crate::clock;
 use crate::config::Config;
-use crate::reading::RawRead;
-use crate::state::{self, SensorState};
 use crate::topics::Topics;
 
 pub async fn run(cfg: Config) -> Result<()> {
     broker::spawn(&cfg)?;
     let topics = Topics::new(&cfg.receiver_id);
+    let battery = BatteryCurve::default();
 
     let mut opts = MqttOptions::new(
         format!("aquilo-server-{}", cfg.receiver_id),
@@ -32,7 +33,7 @@ pub async fn run(cfg: Config) -> Result<()> {
     spawn_ping(client.clone(), topics.ping.clone(), cfg.ping_interval_secs);
 
     // The state evolves with each reading; only this loop touches it.
-    let mut current = SensorState::seed(&cfg, state::now_rfc3339());
+    let mut current = seed_state(&cfg, clock::now_rfc3339());
 
     loop {
         match eventloop.poll().await {
@@ -47,7 +48,7 @@ pub async fn run(cfg: Config) -> Result<()> {
                 info!("subscribed to device topics");
             }
             Ok(Event::Incoming(Packet::Publish(p))) => {
-                handle_publish(&client, &cfg, &topics, &mut current, &p).await?;
+                handle_publish(&client, &cfg, &topics, &battery, &mut current, &p).await?;
             }
             Ok(_) => {}
             Err(e) => {
@@ -71,6 +72,37 @@ fn spawn_ping(client: AsyncClient, topic: String, interval_secs: u64) {
             }
         }
     });
+}
+
+/// Identity + history-backed fields carried into every computed reading. Until
+/// persistence lands, `lstEmpty`/`daysLeft` come straight from the config seed.
+fn statics(cfg: &Config) -> StaticFields {
+    StaticFields {
+        sensor_id: cfg.sensor_id.clone(),
+        name: cfg.sensor_name.clone(),
+        lst_empty: cfg.state.lst_empty.clone(),
+        days_left: cfg.state.days_left,
+        from: cfg.state.from.clone(),
+    }
+}
+
+/// The last-known `/state` to serve before the first live reading, taken verbatim
+/// from the config seed (a captured vendor state). The live compute path takes
+/// over on the first `/read`.
+fn seed_state(cfg: &Config, lst_read: String) -> SensorState {
+    let s = &cfg.state;
+    SensorState {
+        id: cfg.sensor_id.clone(),
+        name: cfg.sensor_name.clone(),
+        lvl: s.lvl,
+        pct: s.pct,
+        bat: s.bat,
+        lst_read,
+        lst_empty: s.lst_empty.clone(),
+        days_left: s.days_left,
+        lvl_to_full: s.lvl_to_full,
+        from: s.from.clone(),
+    }
 }
 
 async fn seed_retained(
@@ -120,22 +152,32 @@ async fn handle_publish(
     client: &AsyncClient,
     cfg: &Config,
     topics: &Topics,
+    battery: &BatteryCurve,
     state: &mut SensorState,
     p: &Publish,
 ) -> Result<()> {
     let topic = p.topic.as_str();
 
     if topic == topics.read {
-        match RawRead::parse(&p.payload) {
-            Ok(reading) => match reading.level() {
-                Some(lvl) => {
-                    state.lvl = lvl;
-                    state.lst_read = state::now_rfc3339();
-                    info!(lvl, sensor = ?reading.sensor, "read received; republishing state (level passthrough)");
-                    publish_state(client, &topics.state, state).await?;
-                }
-                None => warn!("read payload missing read1; ignoring"),
-            },
+        match Reading::parse(&p.payload) {
+            Ok(reading) => {
+                *state = SensorState::compute(
+                    &reading,
+                    &cfg.calibration,
+                    battery,
+                    &statics(cfg),
+                    clock::now_rfc3339(),
+                );
+                info!(
+                    lvl = state.lvl,
+                    pct = state.pct,
+                    bat = state.bat,
+                    lvl_to_full = state.lvl_to_full,
+                    sensor = %reading.sensor,
+                    "read received; republishing computed state"
+                );
+                publish_state(client, &topics.state, state).await?;
+            }
             Err(e) => warn!(error = %e, "failed to parse read payload"),
         }
     } else if topic == topics.log {

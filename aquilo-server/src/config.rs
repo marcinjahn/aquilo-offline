@@ -1,6 +1,7 @@
 //! Device/tank configuration. Everything device-specific lives here rather than
 //! in source, so the binary is generic and shareable (PRD: Configuration).
 
+use aquilo_core::Calibration;
 use serde::Deserialize;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -28,6 +29,10 @@ pub struct Config {
     pub listen_port: u16,
     #[serde(default = "defaults::ping_interval_secs")]
     pub ping_interval_secs: u64,
+
+    /// Tank calibration driving `pct`/`lvlToFull` (PRD user story 12).
+    #[serde(default)]
+    pub calibration: Calibration,
 
     /// Seed values for the retained `/state` published before the first reading.
     pub state: StateSeed,

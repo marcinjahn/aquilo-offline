@@ -16,6 +16,14 @@ bind_addr = "0.0.0.0"
 listen_port = 1883
 ping_interval_secs = 1200        # app-level /ping cadence (~20 min)
 
+# Tank calibration. lvl is the radar distance to the surface (cm); smaller = fuller.
+#   pct       = round((empty_dist - lvl) / (empty_dist - full_dist) * 100)
+#   lvlToFull = round(lvl - full_dist)
+# Defaults (40 / 178) reproduce the captured vendor samples; set to your tank.
+[calibration]
+full_dist = 40.0
+empty_dist = 178.0
+
 # Seed values for the retained /state published before the first live reading.
 [state]
 lvl = 150.2

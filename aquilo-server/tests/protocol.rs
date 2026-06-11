@@ -5,6 +5,7 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
+use aquilo_core::Calibration;
 use aquilo_server::config::{Config, StateSeed};
 use aquilo_server::topics::Topics;
 use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, Publish, QoS};
@@ -24,6 +25,7 @@ fn test_config() -> Config {
         bind_addr: "127.0.0.1".to_string(),
         listen_port: TEST_PORT,
         ping_interval_secs: 1,
+        calibration: Calibration::default(),
         state: StateSeed {
             lvl: 150.2,
             pct: 20,
@@ -70,6 +72,11 @@ where
 fn sensor_lvl(p: &Publish) -> Option<f64> {
     let value: serde_json::Value = serde_json::from_slice(&p.payload).ok()?;
     value["sensors"][0]["lvl"].as_f64()
+}
+
+fn sensor_field(p: &Publish, field: &str) -> Option<i64> {
+    let value: serde_json::Value = serde_json::from_slice(&p.payload).ok()?;
+    value["sensors"][0][field].as_i64()
 }
 
 #[tokio::test]
@@ -186,5 +193,14 @@ async fn device_handshake_and_read_roundtrip() {
         sensor_lvl(state_msg),
         Some(152.8),
         "retained /state must reflect the latest reading"
+    );
+    // The values must be calibrated, not passed through: lvl 152.8 + the default
+    // calibration → pct 18, lvlToFull 113; battery 3770 mV → bat 83.
+    assert_eq!(sensor_field(state_msg, "pct"), Some(18), "computed pct");
+    assert_eq!(sensor_field(state_msg, "bat"), Some(83), "computed bat");
+    assert_eq!(
+        sensor_field(state_msg, "lvlToFull"),
+        Some(113),
+        "computed lvlToFull"
     );
 }
