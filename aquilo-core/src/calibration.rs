@@ -6,9 +6,9 @@
 //! config (PRD: Configuration / user story 12). The defaults are the values that
 //! reproduce the captured vendor samples.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
 pub struct Calibration {
     /// Radar distance (cm) at which the tank reads full. ~40 for the sample tank.
     #[serde(default = "default_full_dist")]

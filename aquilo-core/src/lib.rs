@@ -5,10 +5,12 @@
 
 pub mod battery;
 pub mod calibration;
+pub mod history;
 pub mod reading;
 pub mod state;
 
 pub use battery::BatteryCurve;
 pub use calibration::Calibration;
+pub use history::ReadingRecord;
 pub use reading::{RawFrame, Reading};
 pub use state::{SensorState, StaticFields};

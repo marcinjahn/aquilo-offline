@@ -16,6 +16,13 @@ bind_addr = "0.0.0.0"
 listen_port = 1883
 ping_interval_secs = 1200        # app-level /ping cadence (~20 min)
 
+# Persistence. The state file (history, lstEmpty baseline, last computed state,
+# cached calibration) lives here and is re-seeded on startup so a reboot leaves a
+# valid /state immediately. The HA add-on points this at its /data volume.
+data_dir = "/data"
+history_max_len = 500            # rolling reading history cap (oldest dropped)
+pump_out_drop_pct = 25           # fullness drop (pct points) that counts as a pump-out
+
 # Tank calibration. lvl is the radar distance to the surface (cm); smaller = fuller.
 #   pct       = round((empty_dist - lvl) / (empty_dist - full_dist) * 100)
 #   lvlToFull = round(lvl - full_dist)

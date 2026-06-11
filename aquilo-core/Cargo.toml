@@ -8,3 +8,6 @@ license.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# Timestamp parsing only (no clock): the core never reads wall time, it just
+# decodes the RFC3339 strings already stored on history records.
+chrono = { version = "0.4", default-features = false, features = ["alloc"] }

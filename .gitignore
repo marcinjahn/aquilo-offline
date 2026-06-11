@@ -3,6 +3,11 @@
 **/*.rs.bk
 *.pdb
 
+# Persisted runtime state (local dev data_dir)
+/data/
+**/state.json
+**/state.json.tmp
+
 # Node
 node_modules/
 npm-debug.log*

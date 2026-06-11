@@ -1,11 +1,19 @@
 //! The `serve` loop: stand up the broker, connect as an MQTT client, seed the
 //! retained connect-time messages, keep the device alive with `/ping`, and on each
-//! raw reading republish a retained `/state`.
+//! raw reading recompute and republish a retained `/state`.
+//!
+//! State is durable. On startup the persisted store is loaded and the retained
+//! `/state` is re-seeded from the last computed state before the device
+//! reconnects, so a host reboot leaves a valid state immediately. Each new reading
+//! is appended to history; `lstEmpty` (pump-out) and `daysLeft` (fill rate) are
+//! recomputed over that history and the whole lot is persisted atomically.
 
 use std::time::Duration;
 
 use anyhow::Result;
+use aquilo_core::history::{self, ReadingRecord};
 use aquilo_core::{BatteryCurve, Reading, SensorState, StaticFields};
+use aquilo_store::{JsonFileStore, PersistedState, Store};
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, Publish, QoS};
 use serde_json::json;
 use tracing::{debug, info, warn};
@@ -15,10 +23,26 @@ use crate::clock;
 use crate::config::Config;
 use crate::topics::Topics;
 
+/// The evolving server state. Only the serve loop touches it.
+struct Runtime {
+    /// The current computed `/state` (seeded, then updated on each reading).
+    current: SensorState,
+    /// Rolling reading history backing the `daysLeft` projection.
+    history: Vec<ReadingRecord>,
+    /// The `lstEmpty` baseline, advanced when a pump-out is detected.
+    lst_empty: String,
+}
+
 pub async fn run(cfg: Config) -> Result<()> {
     broker::spawn(&cfg)?;
     let topics = Topics::new(&cfg.receiver_id);
     let battery = BatteryCurve::default();
+    let store = JsonFileStore::in_dir(&cfg.data_dir);
+
+    let mut rt = load_runtime(&cfg, &store);
+    // Persist immediately so the store reflects the seed (and exists) even before
+    // the first live reading arrives.
+    persist(&store, &cfg, &rt);
 
     let mut opts = MqttOptions::new(
         format!("aquilo-server-{}", cfg.receiver_id),
@@ -32,23 +56,20 @@ pub async fn run(cfg: Config) -> Result<()> {
 
     spawn_ping(client.clone(), topics.ping.clone(), cfg.ping_interval_secs);
 
-    // The state evolves with each reading; only this loop touches it.
-    let mut current = seed_state(&cfg, clock::now_rfc3339());
-
     loop {
         match eventloop.poll().await {
             Ok(Event::Incoming(Packet::ConnAck(_))) => {
                 info!("connected to broker; seeding retained messages");
                 // Re-seed on every (re)connect so the retained set is restored
                 // even after a broker restart, which clears its in-memory store.
-                seed_retained(&client, &cfg, &topics, &current).await?;
+                seed_retained(&client, &cfg, &topics, &rt.current).await?;
                 for topic in [&topics.read, &topics.log, &topics.connection] {
                     client.subscribe(topic, QoS::AtMostOnce).await?;
                 }
                 info!("subscribed to device topics");
             }
             Ok(Event::Incoming(Packet::Publish(p))) => {
-                handle_publish(&client, &cfg, &topics, &battery, &mut current, &p).await?;
+                handle_publish(&client, &cfg, &topics, &battery, &store, &mut rt, &p).await?;
             }
             Ok(_) => {}
             Err(e) => {
@@ -74,14 +95,72 @@ fn spawn_ping(client: AsyncClient, topic: String, interval_secs: u64) {
     });
 }
 
-/// Identity + history-backed fields carried into every computed reading. Until
-/// persistence lands, `lstEmpty`/`daysLeft` come straight from the config seed.
-fn statics(cfg: &Config) -> StaticFields {
+/// Builds the initial [`Runtime`] from the store, falling back to the config seed
+/// on a first run or an unreadable store. A persisted `last_state` is re-seeded
+/// verbatim so the device sees the exact state it last had after a reboot.
+fn load_runtime(cfg: &Config, store: &impl Store) -> Runtime {
+    match store.load() {
+        Ok(Some(p)) => {
+            info!(
+                history = p.history.len(),
+                lst_empty = %p.lst_empty,
+                "loaded persisted state"
+            );
+            let lst_empty = if p.lst_empty.is_empty() {
+                cfg.state.lst_empty.clone()
+            } else {
+                p.lst_empty
+            };
+            let current = p
+                .last_state
+                .unwrap_or_else(|| seed_state(cfg, clock::now_rfc3339()));
+            Runtime {
+                current,
+                history: p.history,
+                lst_empty,
+            }
+        }
+        Ok(None) => {
+            info!("no persisted state; seeding from config");
+            seed_runtime(cfg)
+        }
+        Err(e) => {
+            warn!(error = %e, "failed to load persisted state; seeding from config");
+            seed_runtime(cfg)
+        }
+    }
+}
+
+fn seed_runtime(cfg: &Config) -> Runtime {
+    Runtime {
+        current: seed_state(cfg, clock::now_rfc3339()),
+        history: Vec::new(),
+        lst_empty: cfg.state.lst_empty.clone(),
+    }
+}
+
+/// Snapshots the runtime into the store. Persistence failures are logged but not
+/// fatal: a write error must not stop the device from getting its `/state`.
+fn persist(store: &impl Store, cfg: &Config, rt: &Runtime) {
+    let snapshot = PersistedState {
+        history: rt.history.clone(),
+        lst_empty: rt.lst_empty.clone(),
+        last_state: Some(rt.current.clone()),
+        calibration: cfg.calibration,
+    };
+    if let Err(e) = store.save(&snapshot) {
+        warn!(error = %e, "failed to persist state");
+    }
+}
+
+/// Identity + `from` carried into every computed reading. The history-backed
+/// fields (`lstEmpty`/`daysLeft`) are supplied per-reading by the serve loop.
+fn statics(cfg: &Config, lst_empty: String, days_left: i64) -> StaticFields {
     StaticFields {
         sensor_id: cfg.sensor_id.clone(),
         name: cfg.sensor_name.clone(),
-        lst_empty: cfg.state.lst_empty.clone(),
-        days_left: cfg.state.days_left,
+        lst_empty,
+        days_left,
         from: cfg.state.from.clone(),
     }
 }
@@ -148,12 +227,14 @@ async fn publish_state(client: &AsyncClient, state_topic: &str, state: &SensorSt
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_publish(
     client: &AsyncClient,
     cfg: &Config,
     topics: &Topics,
     battery: &BatteryCurve,
-    state: &mut SensorState,
+    store: &impl Store,
+    rt: &mut Runtime,
     p: &Publish,
 ) -> Result<()> {
     let topic = p.topic.as_str();
@@ -161,22 +242,7 @@ async fn handle_publish(
     if topic == topics.read {
         match Reading::parse(&p.payload) {
             Ok(reading) => {
-                *state = SensorState::compute(
-                    &reading,
-                    &cfg.calibration,
-                    battery,
-                    &statics(cfg),
-                    clock::now_rfc3339(),
-                );
-                info!(
-                    lvl = state.lvl,
-                    pct = state.pct,
-                    bat = state.bat,
-                    lvl_to_full = state.lvl_to_full,
-                    sensor = %reading.sensor,
-                    "read received; republishing computed state"
-                );
-                publish_state(client, &topics.state, state).await?;
+                handle_read(client, cfg, topics, battery, store, rt, &reading).await?;
             }
             Err(e) => warn!(error = %e, "failed to parse read payload"),
         }
@@ -202,6 +268,80 @@ async fn handle_publish(
     Ok(())
 }
 
+/// Folds a fresh reading into the runtime, then persists and republishes the
+/// recomputed `/state`.
+async fn handle_read(
+    client: &AsyncClient,
+    cfg: &Config,
+    topics: &Topics,
+    battery: &BatteryCurve,
+    store: &impl Store,
+    rt: &mut Runtime,
+    reading: &Reading,
+) -> Result<()> {
+    rt.apply_reading(cfg, battery, reading, clock::now_rfc3339());
+    info!(
+        lvl = rt.current.lvl,
+        pct = rt.current.pct,
+        bat = rt.current.bat,
+        days_left = rt.current.days_left,
+        lvl_to_full = rt.current.lvl_to_full,
+        sensor = %reading.sensor,
+        "read received; republishing computed state"
+    );
+
+    persist(store, cfg, rt);
+    publish_state(client, &topics.state, &rt.current).await?;
+    Ok(())
+}
+
+impl Runtime {
+    /// Pure state transition for one reading: detect a pump-out (advancing
+    /// `lstEmpty`), append to history (trimming the oldest past the cap),
+    /// reproject `daysLeft` from the fill rate, and recompute the current
+    /// `/state`. Kept free of I/O so it is unit-testable without the broker.
+    fn apply_reading(
+        &mut self,
+        cfg: &Config,
+        battery: &BatteryCurve,
+        reading: &Reading,
+        now: String,
+    ) {
+        let bat = battery.percent(reading.battery_mv);
+        let new_pct = cfg.calibration.pct(reading.level_cm);
+
+        // A sharp fall in fullness versus the last state means the tank was
+        // emptied; reset the pump-out baseline to this reading's time.
+        if history::is_pump_out(self.current.pct, new_pct, cfg.pump_out_drop_pct) {
+            info!(prev_pct = self.current.pct, new_pct, lst_empty = %now, "pump-out detected; resetting lstEmpty");
+            self.lst_empty = now.clone();
+        }
+
+        self.history.push(ReadingRecord {
+            ts: now.clone(),
+            lvl: reading.level_cm,
+            bat,
+        });
+        if self.history.len() > cfg.history_max_len {
+            let overflow = self.history.len() - cfg.history_max_len;
+            self.history.drain(0..overflow);
+        }
+
+        // Project days-to-full from the fill rate; keep the prior estimate when
+        // the history can't yet support one.
+        let days_left = history::days_left(&self.history, cfg.calibration.full_dist)
+            .unwrap_or(self.current.days_left);
+
+        self.current = SensorState::compute(
+            reading,
+            &cfg.calibration,
+            battery,
+            &statics(cfg, self.lst_empty.clone(), days_left),
+            now,
+        );
+    }
+}
+
 /// Best-effort extraction of a firmware version from the device's `/log` payload.
 /// The exact format isn't pinned down, so we try JSON fields first, then fall back
 /// to a bare version-looking token; otherwise we keep the configured seed.
@@ -218,4 +358,103 @@ fn parse_firmware(payload: &[u8]) -> Option<String> {
     let looks_like_version =
         !text.is_empty() && text.len() < 64 && text.contains('.') && !text.contains([' ', '{', ',']);
     looks_like_version.then(|| text.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::StateSeed;
+    use aquilo_core::Calibration;
+
+    fn cfg(data_dir: &str) -> Config {
+        Config {
+            receiver_id: "ae83fc".into(),
+            sensor_id: "ae5058".into(),
+            mqtt_user: "ae83fc".into(),
+            mqtt_pass: "48007129".into(),
+            firmware_version: "1.7.1.9_sh_en".into(),
+            sensor_name: "ae5058".into(),
+            radar_skip: 9,
+            radar_repeat: 9,
+            bind_addr: "127.0.0.1".into(),
+            listen_port: 1,
+            ping_interval_secs: 1,
+            data_dir: data_dir.into(),
+            history_max_len: 500,
+            pump_out_drop_pct: 25,
+            calibration: Calibration::default(),
+            state: StateSeed {
+                lvl: 150.2,
+                pct: 20,
+                bat: 83,
+                days_left: 51,
+                lvl_to_full: 110,
+                lst_empty: "2026-05-30T00:17:19+02:00".into(),
+                from: "node-4".into(),
+            },
+        }
+    }
+
+    fn reading(read1: i64) -> Reading {
+        let payload = format!(r#"{{"sensor":"ae5058","read1":{read1},"battery":"3770"}}"#);
+        Reading::parse(payload.as_bytes()).unwrap()
+    }
+
+    #[test]
+    fn restart_reseeds_state_from_the_store_not_the_config_seed() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = cfg(dir.path().to_str().unwrap());
+        let store = JsonFileStore::in_dir(&c.data_dir);
+
+        // A prior run that computed and persisted a 152.8 cm reading.
+        let prior = SensorState::compute(
+            &reading(15280),
+            &c.calibration,
+            &BatteryCurve::default(),
+            &statics(&c, "2026-06-01T00:00:00+02:00".into(), 7),
+            "2026-06-09T12:00:00+02:00".into(),
+        );
+        store
+            .save(&PersistedState {
+                history: vec![ReadingRecord {
+                    ts: "2026-06-09T12:00:00+02:00".into(),
+                    lvl: 152.8,
+                    bat: 83,
+                }],
+                lst_empty: "2026-06-01T00:00:00+02:00".into(),
+                last_state: Some(prior.clone()),
+                calibration: c.calibration,
+            })
+            .unwrap();
+
+        // The post-restart load re-seeds from the store: the /state it will
+        // publish is the persisted one (152.8), not the config seed (150.2).
+        let rt = load_runtime(&c, &store);
+        assert_eq!(rt.current.to_json(), prior.to_json());
+        assert_eq!(rt.current.lvl, 152.8);
+        assert_ne!(rt.current.lvl, c.state.lvl);
+        assert_eq!(rt.lst_empty, "2026-06-01T00:00:00+02:00");
+        assert_eq!(rt.history.len(), 1);
+    }
+
+    #[test]
+    fn a_reading_sequence_with_a_pump_out_updates_lst_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = cfg(dir.path().to_str().unwrap());
+        let battery = BatteryCurve::default();
+        let mut rt = seed_runtime(&c);
+        let seeded_empty = rt.lst_empty.clone();
+
+        // A nearly-full reading (50 cm ≈ 93%); fullness rising, so no pump-out.
+        rt.apply_reading(&c, &battery, &reading(5000), "2026-06-08T00:00:00+02:00".into());
+        assert_eq!(rt.lst_empty, seeded_empty, "rising level must not reset lstEmpty");
+
+        // Then a near-empty reading (170 cm ≈ 6%): an ~87-point drop = pump-out.
+        rt.apply_reading(&c, &battery, &reading(17000), "2026-06-09T00:00:00+02:00".into());
+        assert_eq!(rt.lst_empty, "2026-06-09T00:00:00+02:00", "pump-out resets lstEmpty");
+        assert_eq!(
+            rt.current.lst_empty, "2026-06-09T00:00:00+02:00",
+            "computed /state carries the new lstEmpty"
+        );
+    }
 }

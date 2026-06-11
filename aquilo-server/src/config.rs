@@ -30,6 +30,18 @@ pub struct Config {
     #[serde(default = "defaults::ping_interval_secs")]
     pub ping_interval_secs: u64,
 
+    /// Directory holding the persisted state file. In the HA add-on this is the
+    /// `/data` volume, which survives restarts, host reboots and add-on updates.
+    #[serde(default = "defaults::data_dir")]
+    pub data_dir: String,
+    /// Cap on retained history records; the oldest are dropped past this.
+    #[serde(default = "defaults::history_max_len")]
+    pub history_max_len: usize,
+    /// Percentage-point fall in fullness between consecutive readings that counts
+    /// as a pump-out and resets the `lstEmpty` baseline.
+    #[serde(default = "defaults::pump_out_drop_pct")]
+    pub pump_out_drop_pct: i64,
+
     /// Tank calibration driving `pct`/`lvlToFull` (PRD user story 12).
     #[serde(default)]
     pub calibration: Calibration,
@@ -74,6 +86,15 @@ mod defaults {
     }
     pub fn ping_interval_secs() -> u64 {
         1200
+    }
+    pub fn data_dir() -> String {
+        "/data".to_string()
+    }
+    pub fn history_max_len() -> usize {
+        500
+    }
+    pub fn pump_out_drop_pct() -> i64 {
+        25
     }
     pub fn from() -> String {
         "node-4".to_string()

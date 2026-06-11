@@ -12,7 +12,7 @@ use rumqttc::{AsyncClient, Event, EventLoop, MqttOptions, Packet, Publish, QoS};
 
 const TEST_PORT: u16 = 18883;
 
-fn test_config() -> Config {
+fn test_config(data_dir: &str) -> Config {
     Config {
         receiver_id: "ae83fc".to_string(),
         sensor_id: "ae5058".to_string(),
@@ -25,6 +25,9 @@ fn test_config() -> Config {
         bind_addr: "127.0.0.1".to_string(),
         listen_port: TEST_PORT,
         ping_interval_secs: 1,
+        data_dir: data_dir.to_string(),
+        history_max_len: 500,
+        pump_out_drop_pct: 25,
         calibration: Calibration::default(),
         state: StateSeed {
             lvl: 150.2,
@@ -81,7 +84,8 @@ fn sensor_field(p: &Publish, field: &str) -> Option<i64> {
 
 #[tokio::test]
 async fn device_handshake_and_read_roundtrip() {
-    let cfg = test_config();
+    let data_dir = tempfile::tempdir().unwrap();
+    let cfg = test_config(data_dir.path().to_str().unwrap());
     let topics = Topics::new(&cfg.receiver_id);
 
     tokio::spawn({

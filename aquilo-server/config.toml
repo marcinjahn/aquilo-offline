@@ -12,6 +12,10 @@ bind_addr = "0.0.0.0"
 listen_port = 1883
 ping_interval_secs = 1200
 
+data_dir = "data"
+history_max_len = 500
+pump_out_drop_pct = 25
+
 [calibration]
 full_dist = 40.0
 empty_dist = 178.0

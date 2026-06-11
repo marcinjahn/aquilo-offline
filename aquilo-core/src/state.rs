@@ -1,6 +1,7 @@
 //! The vendor `/state` payload the server republishes and the device serves over
 //! HTTP, plus the computation that derives it from a reading.
 
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::battery::BatteryCurve;
@@ -23,7 +24,12 @@ pub struct StaticFields {
 }
 
 /// The computed sensor state, mirroring the vendor `/state` JSON one-to-one.
-#[derive(Clone, Debug, PartialEq)]
+///
+/// Derives serde so the last computed state can be persisted verbatim and
+/// re-seeded on restart. The serialized form uses the Rust field names (our own
+/// store format); the vendor `/state` shape is produced separately by
+/// [`SensorState::to_json`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SensorState {
     pub id: String,
     pub name: String,
