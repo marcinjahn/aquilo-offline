@@ -65,8 +65,9 @@ The full copy-paste setup lives in
    Add-ons → ⋮ → **Repositories** → add this repo's URL → install **Aquilo offline
    server**).
 2. **Recover your device identity** with the one-time [onboarding](#onboarding)
-   step. This gives you `receiver_id`, `sensor_id`, the MQTT user/password, and
-   firmware. Enter those plus your tank calibration into the add-on options.
+   step, run from a computer on your network (not inside the add-on). This gives
+   you `receiver_id`, `sensor_id`, the MQTT user/password, and firmware. Enter
+   those plus your tank calibration into the add-on options.
 3. **Add the device's MQTT login to Mosquitto** (the fixed firmware credentials).
 4. **Redirect `mqtt.aquilo.cloud` to your Home Assistant host** (see
    [DNS rewrite](#dns-rewrite)).
@@ -82,14 +83,23 @@ reboots, and updates.
 
 ### Onboarding
 
-The binary recovers your device's IDs, credentials, firmware, and the cloud's
-retained messages, then writes the initial `config.toml` and state file, so you
-never have to hand-edit topics or IDs. There are two modes:
+Onboarding is a one-time step you run **yourself, outside Home Assistant** — the
+add-on only ever runs `serve` and can't do it for you. Run it from a computer on
+the same network as the device, either with `cargo run` from this repo or a
+prebuilt binary. It recovers your device's IDs, credentials, firmware, and the
+cloud's retained messages, then writes a `config.toml` and an initial state file,
+so you never have to hand-edit topics or IDs. You then copy the recovered values
+into the add-on options.
 
-- **`learn`** is a transparent MQTT proxy to the real cloud (reached by IP to avoid
-  the DNS-rewrite loop). This is the most faithful seed: it records the device's
-  CONNECT credentials and the cloud's actual retained `/state` and `radarParams`.
-  Run it once, before you cut off the cloud.
+While onboarding runs, the device has to reach the computer you're running it on,
+so point the `mqtt.aquilo.cloud` DNS rewrite (see [below](#dns-rewrite)) at that
+computer's IP on port 1883 for the duration, then point it back at your Home
+Assistant host afterwards. There are two modes:
+
+- **`learn`** is a transparent MQTT proxy to the real cloud (reached by IP, so it
+  doesn't loop back through your rewrite). This is the most faithful seed: it
+  records the device's CONNECT credentials and the cloud's actual retained `/state`
+  and `radarParams`. Run it once, before you cut off the cloud.
 - **`observe`** needs no cloud at all. A tiny stand-in broker completes the
   handshake itself, seeds retained messages from documented defaults, and recovers
   the device identity from what the device announces on connect. Use this when the
