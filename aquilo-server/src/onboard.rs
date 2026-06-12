@@ -485,7 +485,10 @@ async fn proxy_connection(
                 for pkt in dec.push(&buf[..n]) {
                     if let Packet::Publish(p) = pkt {
                         info!(topic = %p.topic, retain = p.retain, "captured cloud PUBLISH");
-                        facts.lock().unwrap().apply_cloud_publish(&p.topic, &p.payload);
+                        facts
+                            .lock()
+                            .unwrap()
+                            .apply_cloud_publish(&p.topic, &p.payload);
                     }
                 }
                 maybe_finalize(&facts, &onboard, &written);
@@ -623,8 +626,12 @@ async fn seed_retained(
         .clone()
         .unwrap_or_else(|| rid.to_string());
 
-    sock.write_all(&mqtt_wire::publish(&topics.version, firmware.as_bytes(), true))
-        .await?;
+    sock.write_all(&mqtt_wire::publish(
+        &topics.version,
+        firmware.as_bytes(),
+        true,
+    ))
+    .await?;
 
     let radar = json!({ "sensor": sensor, "skip": 9, "repeat": 9 });
     sock.write_all(&mqtt_wire::publish(

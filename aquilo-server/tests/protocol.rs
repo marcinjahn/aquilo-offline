@@ -51,7 +51,11 @@ fn device_client(client_id: &str) -> (AsyncClient, EventLoop) {
 
 /// Polls the event loop, collecting PUBLISH packets, until `done` is satisfied by
 /// the accumulated set or the deadline passes.
-async fn collect_until<F>(eventloop: &mut EventLoop, deadline: Duration, mut done: F) -> Vec<Publish>
+async fn collect_until<F>(
+    eventloop: &mut EventLoop,
+    deadline: Duration,
+    mut done: F,
+) -> Vec<Publish>
 where
     F: FnMut(&[Publish]) -> bool,
 {
@@ -130,10 +134,7 @@ async fn device_handshake_and_read_roundtrip() {
         assert!(p.retain, "message on {} was not retained", p.topic);
     }
 
-    let version = retained
-        .iter()
-        .find(|p| p.topic == topics.version)
-        .unwrap();
+    let version = retained.iter().find(|p| p.topic == topics.version).unwrap();
     assert_eq!(
         String::from_utf8_lossy(&version.payload),
         "1.7.1.9_sh_en",
@@ -184,7 +185,10 @@ async fn device_handshake_and_read_roundtrip() {
     // A fresh subscriber proves the new state was stored *retained*, not just
     // forwarded to the already-connected device.
     let (fresh, mut fresh_loop) = device_client("CieczSensorae83fc-probe");
-    fresh.subscribe(&topics.state, QoS::AtMostOnce).await.unwrap();
+    fresh
+        .subscribe(&topics.state, QoS::AtMostOnce)
+        .await
+        .unwrap();
     let retained_after = collect_until(&mut fresh_loop, Duration::from_secs(10), |ps| {
         ps.iter().any(|p| p.topic == topics.state)
     })

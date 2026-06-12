@@ -35,9 +35,8 @@ fn main() -> anyhow::Result<()> {
 fn init_tracing() {
     // Keep our own logs at info; quiet rumqttd's per-packet routing spans, but
     // keep its server logs (device accept/connect) which are useful diagnostics.
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        EnvFilter::new("info,aquilo_server=info,rumqttd::router=warn")
-    });
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info,aquilo_server=info,rumqttd::router=warn"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 }
 

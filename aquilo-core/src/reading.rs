@@ -143,7 +143,9 @@ impl Reading {
 
         Ok(Reading {
             sensor,
-            version: p.version.or_else(|| raw.as_ref().map(|f| f.version.clone())),
+            version: p
+                .version
+                .or_else(|| raw.as_ref().map(|f| f.version.clone())),
             level_cm,
             battery_mv,
             read_no: p.read_no.or_else(|| raw.as_ref().map(|f| f.read_no)),

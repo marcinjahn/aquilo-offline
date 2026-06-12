@@ -387,8 +387,10 @@ fn parse_firmware(payload: &[u8]) -> Option<String> {
     }
 
     let text = std::str::from_utf8(payload).ok()?.trim();
-    let looks_like_version =
-        !text.is_empty() && text.len() < 64 && text.contains('.') && !text.contains([' ', '{', ',']);
+    let looks_like_version = !text.is_empty()
+        && text.len() < 64
+        && text.contains('.')
+        && !text.contains([' ', '{', ',']);
     looks_like_version.then(|| text.to_string())
 }
 
@@ -479,12 +481,28 @@ mod tests {
         let seeded_empty = rt.lst_empty.clone();
 
         // A nearly-full reading (50 cm ≈ 93%); fullness rising, so no pump-out.
-        rt.apply_reading(&c, &battery, &reading(5000), "2026-06-08T00:00:00+02:00".into());
-        assert_eq!(rt.lst_empty, seeded_empty, "rising level must not reset lstEmpty");
+        rt.apply_reading(
+            &c,
+            &battery,
+            &reading(5000),
+            "2026-06-08T00:00:00+02:00".into(),
+        );
+        assert_eq!(
+            rt.lst_empty, seeded_empty,
+            "rising level must not reset lstEmpty"
+        );
 
         // Then a near-empty reading (170 cm ≈ 6%): an ~87-point drop = pump-out.
-        rt.apply_reading(&c, &battery, &reading(17000), "2026-06-09T00:00:00+02:00".into());
-        assert_eq!(rt.lst_empty, "2026-06-09T00:00:00+02:00", "pump-out resets lstEmpty");
+        rt.apply_reading(
+            &c,
+            &battery,
+            &reading(17000),
+            "2026-06-09T00:00:00+02:00".into(),
+        );
+        assert_eq!(
+            rt.lst_empty, "2026-06-09T00:00:00+02:00",
+            "pump-out resets lstEmpty"
+        );
         assert_eq!(
             rt.current.lst_empty, "2026-06-09T00:00:00+02:00",
             "computed /state carries the new lstEmpty"

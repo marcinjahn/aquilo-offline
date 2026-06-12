@@ -84,9 +84,7 @@ impl Store for JsonFileStore {
                 Ok(Some(state))
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => {
-                Err(e).with_context(|| format!("reading state file {}", self.path.display()))
-            }
+            Err(e) => Err(e).with_context(|| format!("reading state file {}", self.path.display())),
         }
     }
 
@@ -111,11 +109,7 @@ impl Store for JsonFileStore {
             f.sync_all()?;
         }
         std::fs::rename(&self.tmp, &self.path).with_context(|| {
-            format!(
-                "renaming {} -> {}",
-                self.tmp.display(),
-                self.path.display()
-            )
+            format!("renaming {} -> {}", self.tmp.display(), self.path.display())
         })?;
         Ok(())
     }
@@ -184,10 +178,7 @@ mod tests {
         // After a restart the server seeds the retained `/state` from the
         // persisted last_state; that JSON must match what was last published.
         let original = state.last_state.as_ref().unwrap().to_json();
-        let reloaded = JsonFileStore::in_dir(dir.path())
-            .load()
-            .unwrap()
-            .unwrap();
+        let reloaded = JsonFileStore::in_dir(dir.path()).load().unwrap().unwrap();
         let seeded = reloaded.last_state.unwrap().to_json();
         assert_eq!(seeded, original);
     }

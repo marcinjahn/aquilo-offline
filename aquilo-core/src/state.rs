@@ -131,10 +131,8 @@ mod tests {
 
     #[test]
     fn changing_calibration_changes_derived_values() {
-        let reading = Reading::parse(
-            br#"{"sensor":"ae5058","read1":15020,"battery":"3770"}"#,
-        )
-        .unwrap();
+        let reading =
+            Reading::parse(br#"{"sensor":"ae5058","read1":15020,"battery":"3770"}"#).unwrap();
         let base = SensorState::compute(
             &reading,
             &Calibration::default(),
