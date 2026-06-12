@@ -21,11 +21,15 @@ ARG TARGETARCH
 ARG TARGETVARIANT
 
 # Cross linkers for the non-native targets. The dependency tree is pure Rust (TLS
-# is disabled — see the workspace Cargo.toml), so we only need a linker per arch,
-# not a full C cross-compiler or target libc headers.
+# is disabled — see the workspace Cargo.toml), so we don't need a C cross-compiler,
+# but linking against glibc still needs the target's C-runtime objects (Scrt1.o,
+# crti.o, libc) from libc6-dev-*-cross. gcc-arm-linux-gnueabihf, unlike its arm64
+# counterpart, does not pull that in, so we install both explicitly.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc-aarch64-linux-gnu \
         gcc-arm-linux-gnueabihf \
+        libc6-dev-arm64-cross \
+        libc6-dev-armhf-cross \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
