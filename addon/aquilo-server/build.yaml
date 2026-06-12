@@ -2,12 +2,12 @@
 # binary built by the `rust:1-bookworm` builder stage runs as-is. The CI workflow
 # (.github/workflows/addon.yml) builds the multi-arch images from the repository
 # root context and pushes them to GHCR; the Supervisor then pulls `image:` from
-# config.yaml. Replace CHANGE_ME with your GitHub owner.
+# config.yaml.
 build_from:
   aarch64: ghcr.io/home-assistant/aarch64-base-debian:bookworm
   amd64: ghcr.io/home-assistant/amd64-base-debian:bookworm
   armv7: ghcr.io/home-assistant/armv7-base-debian:bookworm
-image: ghcr.io/CHANGE_ME/{arch}-aquilo-server
+image: ghcr.io/marcinjahn/{arch}-aquilo-server
 labels:
   org.opencontainers.image.title: Aquilo offline server
-  org.opencontainers.image.source: https://github.com/CHANGE_ME/aquilo-server
+  org.opencontainers.image.source: https://github.com/marcinjahn/aquilo-server

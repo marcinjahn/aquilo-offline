@@ -16,8 +16,10 @@ built-in RESTful sensor pointed at the device's `/state` (see below).
    AdGuard/router DNS rewrite) so the device connects to Mosquitto instead of the
    cloud. The device speaks plaintext MQTT on port `1883`.
 3. Your device identity (`receiver_id`, `sensor_id`, MQTT user/pass). If you don't
-   know these, run the binary's one-time `learn` (proxy through the real cloud) or
-   `observe` (cloud-free) onboarding to recover them — see the project README.
+   know these, recover them with the one-time `learn` (proxy through the real
+   cloud) or `observe` (cloud-free) onboarding, which you run from a computer on
+   your network rather than this add-on — see the project README. Then copy the
+   recovered values into the options below.
 
 ## Step 1 — Add the device's MQTT login to Mosquitto
 

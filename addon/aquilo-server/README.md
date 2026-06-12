@@ -14,7 +14,6 @@ the add-on options, the RESTful-sensor config, and backup/recovery.
    URL.
 2. Install **Aquilo offline server**, set the options (DOCS.md), and start it.
 
-> Images are pulled from GHCR (`ghcr.io/<owner>/<arch>-aquilo-server`). If you fork
-> this repo, replace `CHANGE_ME` in `config.yaml`, `build.yaml`, and
-> `repository.yaml` with your GitHub owner and let the `addon.yml` workflow publish
-> them.
+> Images are pulled from GHCR (`ghcr.io/marcinjahn/<arch>-aquilo-server`), published
+> by the `addon.yml` workflow. If you fork this repo, replace `marcinjahn` in
+> `config.yaml`, `build.yaml`, and `repository.yaml` with your own GitHub owner.

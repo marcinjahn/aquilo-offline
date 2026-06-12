@@ -5,10 +5,10 @@ description: >-
   Local stand-in for the Aquilo vendor cloud. Keeps the receiver connected to
   your Mosquitto broker and republishes the computed retained /state, so the
   device's own HTTP /state keeps working with the internet cut.
-url: https://github.com/CHANGE_ME/aquilo-server/tree/main/addon/aquilo-server
+url: https://github.com/marcinjahn/aquilo-server/tree/main/addon/aquilo-server
 # Prebuilt multi-arch images published to GHCR (see .github/workflows/addon.yml).
-# Replace CHANGE_ME with your GitHub owner; the tag tracks `version` above.
-image: ghcr.io/CHANGE_ME/{arch}-aquilo-server
+# The tag tracks `version` above.
+image: ghcr.io/marcinjahn/{arch}-aquilo-server
 arch:
   - aarch64
   - amd64
