@@ -16,6 +16,13 @@ on:
       - ".github/workflows/addon.yml"
   workflow_dispatch:
 
+# Serialize image builds per ref. Unlike CI, we do NOT cancel in-progress runs:
+# a run that's mid-push to GHCR should finish cleanly rather than be interrupted.
+# A newer push queues behind it instead.
+concurrency:
+  group: addon-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   test:
     runs-on: ubuntu-latest
