@@ -20,9 +20,9 @@ FROM --platform=$BUILDPLATFORM rust:1-bookworm AS builder
 ARG TARGETARCH
 ARG TARGETVARIANT
 
-# Cross C/linker toolchains for the non-native targets. `ring` (pulled in via
-# rustls) compiles C and assembly, so it needs a full cross-compiler, not just a
-# cross-linker.
+# Cross linkers for the non-native targets. The dependency tree is pure Rust (TLS
+# is disabled — see the workspace Cargo.toml), so we only need a linker per arch,
+# not a full C cross-compiler or target libc headers.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc-aarch64-linux-gnu \
         gcc-arm-linux-gnueabihf \
@@ -34,21 +34,17 @@ COPY aquilo-core ./aquilo-core
 COPY aquilo-store ./aquilo-store
 COPY aquilo-server ./aquilo-server
 
-# Map the Docker target arch to a Rust triple + cross toolchain, build, then lift
-# the binary out of the (cache-mounted, non-persisted) target dir to a fixed path.
+# Map the Docker target arch to a Rust triple + cross linker, build, then lift the
+# binary out of the (cache-mounted, non-persisted) target dir to a fixed path.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target,id=aquilo-target-${TARGETARCH}${TARGETVARIANT} \
     set -eux; \
     case "${TARGETARCH}/${TARGETVARIANT}" in \
       "amd64/"*) target=x86_64-unknown-linux-gnu ;; \
       "arm64/"*) target=aarch64-unknown-linux-gnu; \
-        export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc; \
-        export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc; \
-        export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar ;; \
+        export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc ;; \
       "arm/v7") target=armv7-unknown-linux-gnueabihf; \
-        export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc; \
-        export CC_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-gcc; \
-        export AR_armv7_unknown_linux_gnueabihf=arm-linux-gnueabihf-ar ;; \
+        export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc ;; \
       *) echo "unsupported target ${TARGETARCH}/${TARGETVARIANT}" >&2; exit 1 ;; \
     esac; \
     rustup target add "$target"; \

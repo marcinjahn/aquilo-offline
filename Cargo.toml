@@ -15,7 +15,11 @@ serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-rumqttc = "0.25"
-rumqttd = "0.20"
+# TLS disabled: the broker listens plaintext on the LAN and the server connects
+# plaintext, so we drop the default `use-rustls` feature. This removes the
+# aws-lc-sys / ring / rustls C+asm crypto stack, which keeps cross-compilation
+# (see addon/aquilo-server/Dockerfile) pure-Rust and fast on every arch.
+rumqttc = { version = "0.25", default-features = false }
+rumqttd = { version = "0.20", default-features = false }
 toml = "0.8"
 chrono = { version = "0.4", features = ["clock"], default-features = false }
