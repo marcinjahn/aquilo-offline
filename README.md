@@ -292,13 +292,12 @@ a fuller tank.
 - `pct = round((EMPTY_DIST - lvl) / (EMPTY_DIST - FULL_DIST) * 100)`, `EMPTY_DIST ≈ 178` cm
 - `daysLeft` is a fill-rate projection since `lstEmpty`
 - `lstEmpty` is the timestamp of the last pump-out (detected as a large level drop)
-- `bat` is a battery mV → % curve (`3770 mV → 83%`; just one data point so far)
+- `bat` is a battery mV → % curve (`3770 mV → 83%`)
 
 `FULL_DIST` and `EMPTY_DIST` are server-side tank config; offline they become our
 own calibration constants (the `full_dist` / `empty_dist` add-on options).
 `daysLeft` and `bat%` are reasonable approximations, not exact replicas of the
-vendor's algorithm. Samples gathered so far: `(lvl 152.8 → pct 18)`,
-`(lvl 150.4 → pct 20, lvlToFull 110)`, `(lvl 150.2 → pct 20, lvlToFull 110, daysLeft 51)`.
+vendor's algorithm, and they get sharper as more readings accumulate.
 
 ### Capture tooling
 
@@ -314,9 +313,3 @@ reference for the Rust `learn` mode and the protocol integration test:
   endpoints validate the server cert. Probably unneeded, since the device uses
   plaintext MQTT.
 - `README.md` has run instructions.
-
-## Open data gaps (non-blocking)
-
-These are accuracy improvements only: the exact `/ping` cadence; more
-`(lvl, pct, lvlToFull)` samples to pin down `FULL_DIST` / `EMPTY_DIST`; and more
-battery `mV → %` points.
