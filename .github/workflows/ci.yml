@@ -1,13 +1,13 @@
 name: CI
 
-# Runs formatting, lint, and the test suite for the Rust workspace on every push
-# and pull request.
+# Runs formatting, lint, and the test suite for the Rust workspace. Triggered on
+# pull requests, and reused by the add-on image build (see addon.yml) so the same
+# checks gate every push to GHCR — without duplicating the job on main.
 
 on:
-  push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 env:
   CARGO_TERM_COLOR: always
