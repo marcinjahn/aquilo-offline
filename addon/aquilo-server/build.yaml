@@ -10,4 +10,4 @@ build_from:
 image: ghcr.io/marcinjahn/{arch}-aquilo-server
 labels:
   org.opencontainers.image.title: Aquilo offline server
-  org.opencontainers.image.source: https://github.com/marcinjahn/aquilo-server
+  org.opencontainers.image.source: https://github.com/marcinjahn/aquilo-offline
