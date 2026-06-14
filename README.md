@@ -18,6 +18,8 @@ and `/state` keeps working with no internet and no changes to the device.
 It ships as a Home Assistant add-on that connects to a Mosquitto broker, and it's
 light enough to run on a Raspberry Pi.
 
+[![Open your Home Assistant instance and show the add add-on repository dialog with this repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fmarcinjahn%2Faquilo-server)
+
 Only tested with the **WiFi** sensor variant. The LTE variant and multi-sensor
 setups aren't covered. The config templating leaves room for them, but that path
 is untested.
@@ -63,9 +65,15 @@ is untested.
 The full copy-paste setup lives in
 [`addon/aquilo-server/DOCS.md`](addon/aquilo-server/DOCS.md). The outline:
 
-1. **Install the Mosquitto broker add-on** and this repo's add-on (Settings →
-   Add-ons → ⋮ → **Repositories** → add this repo's URL → install **Aquilo offline
-   server**).
+1. **Install the Mosquitto broker add-on** and this repo's add-on. Add this
+   repository with one click, then install **Aquilo offline server** from the
+   store:
+
+   [![Open your Home Assistant instance and show the add add-on repository dialog with this repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fmarcinjahn%2Faquilo-server)
+
+   (Or manually: Settings → Add-ons → ⋮ → **Repositories** → add
+   `https://github.com/marcinjahn/aquilo-server`.)
+
 2. **Recover your device identity** with the one-time [onboarding](#onboarding)
    step, run from a computer on your network (not inside the add-on). This gives
    you `receiver_id`, `sensor_id`, the MQTT user/password, and firmware. Enter
