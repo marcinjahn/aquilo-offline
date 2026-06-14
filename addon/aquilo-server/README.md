@@ -5,14 +5,17 @@ your **Mosquitto** broker, standing in for the Aquilo vendor cloud. The receiver
 keeps serving its HTTP `/state` with the internet cut; surface it in Home
 Assistant with a built-in RESTful sensor.
 
-See **[DOCS.md](DOCS.md)** for setup: adding the device's MQTT login to Mosquitto,
-the add-on options, the RESTful-sensor config, and backup/recovery.
+See the **Documentation** tab (or
+[DOCS.md on GitHub](https://github.com/marcinjahn/aquilo-offline/blob/main/addon/aquilo-server/DOCS.md))
+for setup: adding the device's MQTT login to Mosquitto, the add-on options, the
+RESTful-sensor config, and backup/recovery.
 
 ## Install
 
 1. Settings → Add-ons → Add-on store → ⋮ → **Repositories**, and add this repo's
    URL.
-2. Install **Aquilo offline server**, set the options (DOCS.md), and start it.
+2. Install **Aquilo offline server**, set the options (see the Documentation tab),
+   and start it.
 
 > Images are pulled from GHCR (`ghcr.io/marcinjahn/<arch>-aquilo-server`), published
 > by the `addon.yml` workflow. If you fork this repo, replace `marcinjahn` in
