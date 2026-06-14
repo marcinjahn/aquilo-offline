@@ -142,19 +142,20 @@ mod defaults {
     pub fn from() -> String {
         "node-4".to_string()
     }
-    // Neutral placeholder `/state` shown until the first live reading lands. Mirrors
-    // the documented vendor sample so the HA RESTful sensor sees a plausible state.
+    // All-zero placeholder `/state` shown until the first live reading lands. Zeros
+    // read unmistakably as "no data yet" instead of masquerading as a real reading;
+    // the first `/read` overwrites them (usually within a day).
     pub fn seed_lvl() -> f64 {
-        150.2
+        0.0
     }
     pub fn seed_pct() -> i64 {
-        20
+        0
     }
     pub fn seed_bat() -> i64 {
-        83
+        0
     }
     pub fn seed_lvl_to_full() -> i64 {
-        110
+        0
     }
 }
 
@@ -189,8 +190,8 @@ mod tests {
         assert_eq!(broker.host, "core-mosquitto");
         assert_eq!(broker.port, 1883, "port defaults to 1883");
         assert_eq!(broker.username, "addons");
-        // No [state] table → the documented placeholder seed is used.
-        assert_eq!(cfg.state.lvl, 150.2);
+        // No [state] table → the all-zero placeholder seed is used.
+        assert_eq!(cfg.state.lvl, 0.0);
         assert_eq!(cfg.state.lst_empty, "");
     }
 

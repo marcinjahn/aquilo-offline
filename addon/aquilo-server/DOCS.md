@@ -114,6 +114,36 @@ A single `rest:` block with multiple `sensor:` entries issues **one** request pe
 gentle polling the device needs. Restart Home Assistant (or reload RESTful
 entities) to pick it up.
 
+## First start — what to expect
+
+A freshly installed add-on has **no history**, so the first thing it serves is a
+placeholder, not live data. This is normal — don't be alarmed by the numbers below.
+
+- **Until the first reading arrives, `/state` shows an all-zero placeholder**:
+  `lvl`, `pct`, `bat` and `lvlToFull` are `0`, `daysLeft` is `0`, and `lstEmpty` is
+  blank. The zeros are a deliberate "no data yet" marker; they are overwritten the
+  moment a real reading lands.
+- **Readings arrive only a few times a day** (the radar node transmits on its own
+  schedule). The confirmation that the full path works is a log line:
+  `read received; republishing computed state` — after that, `/state` carries live
+  `lvl`/`pct`/`bat` and a fresh `lstRead`. Give it up to a day; there's nothing to
+  do but wait.
+- **`daysLeft` stays `0` until several readings accumulate.** It's a fill-rate
+  projection over the add-on's _own_ history, which starts empty. The vendor cloud's
+  old estimate is not transferred (we don't have its history) — a new one builds up
+  over the following days.
+- **`lstEmpty` stays blank until the first pump-out is detected** — a fullness drop
+  of at least `pump_out_drop_pct` points between two readings. It self-heals the
+  next time the tank is emptied; until then there is genuinely nothing local that
+  has observed an emptying.
+- On connect the device may log a single `online → offline → online` cycle as it
+  applies its config, then settle into steady ~30 s pings. That one blip is fine;
+  what you do **not** want to see is it cycling every ~40 min, which would mean it
+  never completed the handshake.
+
+Once you've seen a live reading land, you can lower `log_level` from `debug` to
+`info` to quiet the routine ping lines.
+
 ## Backup & recovery
 
 State lives in `/data` and the options are part of the add-on, so any Home
