@@ -1,6 +1,8 @@
 # Aquilo offline server
 
-Run an [Aquilo WiFi septic-tank liquid-level sensor](https://aquilo.pl/produkt/aquilo-wifi-czujnik-poziomu-cieczy-bezprzewodowy-mikrofalowy/)
+<img src="addon/aquilo-server/icon.png" alt="Aquilo offline server icon" width="96" align="right">
+
+Run an [Aquilo WiFi septic-tank liquid-level sensor](https://aquilo.io/product/aquilo-wifi-liquid-level-sensor-wireless)
 completely offline (no internet, no vendor cloud) while keeping the local
 experience you already have. The device's own `http://<device-ip>/state` endpoint
 keeps serving correct, computed data, just as before.
@@ -157,6 +159,7 @@ cut the device's remaining internet access at your firewall:
 | `aquilo-store`        | Persistence trait plus an atomic JSON-file implementation (history, `lstEmpty`, last state, cached config).                                                               |
 | `aquilo-server`       | The binary: `serve` / `learn` / `observe` modes, MQTT client (`rumqttc`), topic templating, config.                                                                       |
 | `addon/aquilo-server` | Home Assistant add-on packaging (Dockerfile, `config.yaml`, `build.yaml`, `DOCS.md`).                                                                                     |
+| `tools/`              | Repo-maintenance scripts that don't ship with the add-on (e.g. `make-icon.py`, which regenerates the add-on icon).                                                        |
 | `capture/`            | Original Node reverse-engineering tooling, kept as the behavioral reference (see [Capture tooling](#capture-tooling)).                                                    |
 
 `cargo test` covers the core formulas against captured samples, persistence
