@@ -4,7 +4,8 @@
 //! re-seed a valid retained `/state` before the device's first post-restart
 //! reading. This crate gives it that memory: a [`Store`] trait and a JSON-file
 //! implementation that persists the rolling reading history, the `lstEmpty`
-//! baseline, the last computed state, and a cached copy of calibration.
+//! baseline, the current fill cycle's start and fill rate, the last computed
+//! state, and a cached copy of calibration.
 //!
 //! The file is written **atomically** (temp file + fsync + rename) so a crash
 //! mid-write can never leave a half-written, unparseable state file — a reload
@@ -29,6 +30,16 @@ pub struct PersistedState {
     /// Last detected pump-out timestamp (RFC3339); the `lstEmpty` baseline.
     #[serde(default)]
     pub lst_empty: String,
+    /// First reading of the current fill cycle, the baseline of the fill rate.
+    #[serde(default)]
+    pub cycle_start: Option<ReadingRecord>,
+    /// Latest known fill rate (cm/day), carried over a pump-out.
+    #[serde(default)]
+    pub fill_rate: Option<f64>,
+    /// Device counter (`readNo`) of the last applied reading, so a retained
+    /// reading re-delivered on reconnect isn't counted twice.
+    #[serde(default)]
+    pub last_read_no: Option<i64>,
     /// The last computed `/state`, re-seeded retained on startup so the device
     /// gets a valid state immediately after a host reboot.
     #[serde(default)]
@@ -135,6 +146,13 @@ mod tests {
                 },
             ],
             lst_empty: "2026-05-30T00:17:19+02:00".into(),
+            cycle_start: Some(ReadingRecord {
+                ts: "2026-05-30T00:17:19+02:00".into(),
+                lvl: 176.0,
+                bat: 84,
+            }),
+            fill_rate: Some(2.5),
+            last_read_no: Some(73045),
             last_state: Some(SensorState {
                 id: "ae5058".into(),
                 name: "ae5058".into(),

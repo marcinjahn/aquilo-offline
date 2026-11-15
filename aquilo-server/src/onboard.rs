@@ -347,6 +347,9 @@ fn write_outputs(facts: &Facts, opts: &OnboardOptions, now: &str) -> Result<()> 
         .save(&PersistedState {
             history: Vec::new(),
             lst_empty: seed.lst_empty.clone(),
+            cycle_start: None,
+            fill_rate: None,
+            last_read_no: None,
             last_state: Some(last_state),
             calibration: Calibration::default(),
         })

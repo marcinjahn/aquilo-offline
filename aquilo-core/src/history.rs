@@ -1,12 +1,24 @@
 //! Reading history and the history-dependent projections the vendor cloud
-//! computed for us: pump-out detection (a sharp fullness drop resets the
-//! `lstEmpty` baseline) and the `daysLeft` fill-rate estimate.
+//! computed for us: pump-out detection (a confirmed sharp fullness drop starts a
+//! new fill cycle and resets the `lstEmpty` baseline) and the `daysLeft`
+//! projection from the fill rate since the cycle started.
 //!
-//! These are pure functions over a slice of [`ReadingRecord`]; time enters only
-//! as the RFC3339 timestamps already stored on the records, so the projections
-//! are deterministic under test.
+//! These are pure functions over [`ReadingRecord`]s; time enters only as the
+//! RFC3339 timestamps already stored on the records, so the projections are
+//! deterministic under test.
 
 use serde::{Deserialize, Serialize};
+
+use crate::calibration::Calibration;
+
+/// A fill cycle younger than this has too little level change to out-weigh radar
+/// noise (a few cm between consecutive readings), so its own rate isn't trusted
+/// yet and the previous cycle's rate is used instead.
+pub const MIN_CYCLE_DAYS: f64 = 3.0;
+
+/// How many of the latest readings are median-filtered into the current level,
+/// so a single radar glitch can't swing the projection.
+const SMOOTHING_WINDOW: usize = 5;
 
 /// One stored reading: when it was received (RFC3339 with offset), the radar
 /// distance to the surface (cm; smaller = fuller), and the battery percentage at
@@ -18,63 +30,78 @@ pub struct ReadingRecord {
     pub bat: i64,
 }
 
-/// Detects a pump-out from the fullness drop between the previous and the current
-/// reading. Emptying the tank shows up as a sharp fall in `pct`; a drop of at
-/// least `drop_threshold_pct` percentage points is treated as a pump-out, which
-/// the caller uses to reset the `lstEmpty` baseline to the new reading's time.
-pub fn is_pump_out(prev_pct: i64, new_pct: i64, drop_threshold_pct: i64) -> bool {
-    prev_pct - new_pct >= drop_threshold_pct
+/// What a sharp fullness drop turned out to be, judged by the reading after it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Drop {
+    /// No sharp drop between the reading before and the suspected one.
+    None,
+    /// The drop held on the next reading: the tank was emptied.
+    PumpOut,
+    /// The level came straight back: the suspected reading was a radar glitch.
+    Outlier,
 }
 
-/// Projects the number of days until the tank is full — the radar distance falls
-/// to `full_dist` — from a least-squares fit of distance against time over the
-/// history.
+/// Classifies the middle of three consecutive readings (`before`, `suspect`,
+/// `after`). A fullness fall of at least `drop_threshold_pct` points from
+/// `before` to `suspect` is a pump-out only if `after` stays that far below
+/// `before` too; a single low reading is a glitch, not an emptied tank.
+pub fn classify_drop(
+    before: &ReadingRecord,
+    suspect: &ReadingRecord,
+    after: &ReadingRecord,
+    calibration: &Calibration,
+    drop_threshold_pct: i64,
+) -> Drop {
+    let pct_before = calibration.pct(before.lvl);
+    if pct_before - calibration.pct(suspect.lvl) < drop_threshold_pct {
+        Drop::None
+    } else if pct_before - calibration.pct(after.lvl) >= drop_threshold_pct {
+        Drop::PumpOut
+    } else {
+        Drop::Outlier
+    }
+}
+
+/// The fill rate (cm/day) of the current cycle: how far the level has risen
+/// from the cycle's first reading to the smoothed current reading, over the time
+/// between them.
 ///
-/// Returns `None` when there isn't enough signal to project: fewer than two
-/// readings, all readings at the same instant, or a trend that isn't filling (a
-/// flat or rising distance, where the vendor's "days left" has no meaning).
-pub fn days_left(history: &[ReadingRecord], full_dist: f64) -> Option<i64> {
-    if history.len() < 2 {
+/// Returns `None` while the cycle is younger than [`MIN_CYCLE_DAYS`], when the
+/// level isn't rising, or on a malformed timestamp.
+pub fn fill_rate(cycle_start: &ReadingRecord, history: &[ReadingRecord]) -> Option<f64> {
+    let current = smoothed_reading(history)?;
+    let elapsed_days = days_between(cycle_start, current)?;
+    if elapsed_days < MIN_CYCLE_DAYS {
         return None;
     }
 
-    // x = days since the first reading, y = radar distance (cm).
-    let t0 = parse_ts(&history[0].ts)?;
-    let mut xs = Vec::with_capacity(history.len());
-    let mut ys = Vec::with_capacity(history.len());
-    for r in history {
-        xs.push((parse_ts(&r.ts)? - t0) as f64 / 86_400.0);
-        ys.push(r.lvl);
-    }
+    // The radar distance shrinks as the tank fills.
+    let rate = (cycle_start.lvl - current.lvl) / elapsed_days;
+    (rate > 0.0).then_some(rate)
+}
 
-    let n = history.len() as f64;
-    let mean_x = xs.iter().sum::<f64>() / n;
-    let mean_y = ys.iter().sum::<f64>() / n;
-
-    let mut sxx = 0.0;
-    let mut sxy = 0.0;
-    for i in 0..history.len() {
-        let dx = xs[i] - mean_x;
-        sxx += dx * dx;
-        sxy += dx * (ys[i] - mean_y);
-    }
-    if sxx == 0.0 {
-        // All readings share a timestamp; no rate to fit.
-        return None;
-    }
-
-    // slope is cm/day; while the tank fills the distance shrinks, so a filling
-    // trend is a negative slope. fill_rate is the positive cm/day it closes in
-    // on `full_dist`.
-    let slope = sxy / sxx;
-    let fill_rate = -slope;
-    if fill_rate <= 0.0 {
-        return None;
-    }
-
-    let current = history.last().map(|r| r.lvl)?;
-    let days = (current - full_dist) / fill_rate;
+/// Days from the latest reading until the level reaches `full_dist` at
+/// `fill_rate` cm/day, projected from the smoothed current reading. Zero once
+/// the tank is at or past full.
+pub fn days_left(history: &[ReadingRecord], full_dist: f64, fill_rate: f64) -> Option<i64> {
+    let current = smoothed_reading(history)?;
+    let since_current = days_between(current, history.last()?)?;
+    let days = (current.lvl - full_dist) / fill_rate - since_current;
     Some(days.round().max(0.0) as i64)
+}
+
+/// The median-level reading among the latest [`SMOOTHING_WINDOW`]. Returning the
+/// reading itself, not just its level, keeps its timestamp, so a level that lags
+/// the newest reading on a rising trend is not mistaken for a slower fill.
+fn smoothed_reading(history: &[ReadingRecord]) -> Option<&ReadingRecord> {
+    let start = history.len().saturating_sub(SMOOTHING_WINDOW);
+    let mut window: Vec<&ReadingRecord> = history[start..].iter().collect();
+    window.sort_by(|a, b| a.lvl.total_cmp(&b.lvl));
+    window.get(window.len() / 2).copied()
+}
+
+fn days_between(from: &ReadingRecord, to: &ReadingRecord) -> Option<f64> {
+    Some((parse_ts(&to.ts)? - parse_ts(&from.ts)?) as f64 / 86_400.0)
 }
 
 /// Parses an RFC3339 timestamp to epoch seconds. Returns `None` on a malformed
@@ -89,55 +116,98 @@ fn parse_ts(ts: &str) -> Option<i64> {
 mod tests {
     use super::*;
 
-    fn rec(ts: &str, lvl: f64) -> ReadingRecord {
+    fn day(d: u32, lvl: f64) -> ReadingRecord {
         ReadingRecord {
-            ts: ts.into(),
+            ts: format!("2026-06-{d:02}T00:00:00+02:00"),
             lvl,
             bat: 83,
         }
     }
 
-    #[test]
-    fn detects_a_pump_out_from_a_large_fullness_drop() {
-        // Tank was ~80% full, then emptied to ~10%: a 70-point drop.
-        assert!(is_pump_out(80, 10, 25));
+    /// A tank filling 4 cm/day from empty (178 cm), one reading a day.
+    fn filling(days: u32) -> Vec<ReadingRecord> {
+        (1..=days)
+            .map(|d| day(d, 178.0 - 4.0 * (d - 1) as f64))
+            .collect()
+    }
+
+    fn classify(before: f64, suspect: f64, after: f64) -> Drop {
+        classify_drop(
+            &day(1, before),
+            &day(2, suspect),
+            &day(3, after),
+            &Calibration::default(),
+            25,
+        )
     }
 
     #[test]
-    fn normal_fluctuations_are_not_pump_outs() {
-        // A few points of noise/refilling must not reset the baseline.
-        assert!(!is_pump_out(20, 18, 25));
-        assert!(!is_pump_out(18, 22, 25)); // filling slightly: negative drop
+    fn a_drop_that_holds_is_a_pump_out() {
+        // ~93% full, then emptied to ~6% and staying there.
+        assert_eq!(classify(50.0, 170.0, 169.0), Drop::PumpOut);
     }
 
     #[test]
-    fn projects_days_left_from_a_steady_fill_rate() {
-        // Distance falls 10 cm/day over five days (150 → 110). From the last
-        // reading (110 cm) to full (40 cm) is 70 cm → 7 days at 10 cm/day.
-        let history = vec![
-            rec("2026-06-01T00:00:00+02:00", 150.0),
-            rec("2026-06-02T00:00:00+02:00", 140.0),
-            rec("2026-06-03T00:00:00+02:00", 130.0),
-            rec("2026-06-04T00:00:00+02:00", 120.0),
-            rec("2026-06-05T00:00:00+02:00", 110.0),
-        ];
-        assert_eq!(days_left(&history, 40.0), Some(7));
+    fn a_drop_that_bounces_back_is_a_glitch() {
+        assert_eq!(classify(50.0, 170.0, 50.5), Drop::Outlier);
     }
 
     #[test]
-    fn no_estimate_without_enough_history() {
-        let history = vec![rec("2026-06-01T00:00:00+02:00", 150.0)];
-        assert_eq!(days_left(&history, 40.0), None);
+    fn normal_fluctuations_are_not_drops() {
+        assert_eq!(classify(150.2, 152.8, 150.4), Drop::None);
     }
 
     #[test]
-    fn no_estimate_when_the_tank_is_not_filling() {
-        // Distance growing (tank emptying) gives no days-to-full estimate.
-        let history = vec![
-            rec("2026-06-01T00:00:00+02:00", 110.0),
-            rec("2026-06-02T00:00:00+02:00", 120.0),
-            rec("2026-06-03T00:00:00+02:00", 130.0),
-        ];
-        assert_eq!(days_left(&history, 40.0), None);
+    fn fill_rate_is_the_rise_since_the_cycle_start() {
+        let history = filling(11);
+        assert_eq!(fill_rate(&history[0], &history), Some(4.0));
+    }
+
+    #[test]
+    fn a_young_cycle_has_no_rate_of_its_own() {
+        let history = filling(2);
+        assert_eq!(fill_rate(&history[0], &history), None);
+    }
+
+    #[test]
+    fn a_level_that_isnt_rising_has_no_rate() {
+        let history: Vec<_> = (1..=5).map(|d| day(d, 120.0 + d as f64)).collect();
+        assert_eq!(fill_rate(&history[0], &history), None);
+    }
+
+    #[test]
+    fn a_single_glitch_does_not_move_the_rate() {
+        let mut history = filling(11);
+        history.push(day(12, 5.0));
+        // The median of the last five (150, 146, 142, 138, 5) is 142, on the trend.
+        assert_eq!(fill_rate(&history[0], &history), Some(4.0));
+    }
+
+    #[test]
+    fn a_tank_plateaued_near_full_reads_as_due() {
+        // Filled ~4.4 cm/day for a month, then sat at 45 cm (outlet level) for 10 days.
+        let mut history: Vec<_> = (1..=30)
+            .map(|d| day(d, 178.0 - 4.4 * (d - 1) as f64))
+            .collect();
+        history.extend((1..=10).map(|d| {
+            let mut r = day(d, 45.0);
+            r.ts = format!("2026-07-{d:02}T00:00:00+02:00");
+            r
+        }));
+        let rate = fill_rate(&history[0], &history).unwrap();
+        assert_eq!(days_left(&history, 40.0, rate), Some(0));
+    }
+
+    #[test]
+    fn projects_days_from_the_smoothed_level() {
+        let history = vec![day(1, 112.0), day(2, 110.0), day(3, 108.0)];
+        // 110 cm smoothed a day before the latest: 7 days to full from then, 6 from now.
+        assert_eq!(days_left(&history, 40.0, 10.0), Some(6));
+    }
+
+    #[test]
+    fn a_full_tank_has_zero_days_left() {
+        let history = vec![day(1, 38.0), day(2, 37.0), day(3, 39.0)];
+        assert_eq!(days_left(&history, 40.0, 2.5), Some(0));
     }
 }

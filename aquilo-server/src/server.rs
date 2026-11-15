@@ -11,7 +11,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use aquilo_core::history::{self, ReadingRecord};
+use aquilo_core::history::{self, Drop, ReadingRecord};
 use aquilo_core::{BatteryCurve, Reading, SensorState, StaticFields};
 use aquilo_store::{JsonFileStore, PersistedState, Store};
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, Publish, QoS};
@@ -40,6 +40,15 @@ struct Runtime {
     history: Vec<ReadingRecord>,
     /// The `lstEmpty` baseline, advanced when a pump-out is detected.
     lst_empty: String,
+    /// First reading of the current fill cycle, kept apart from the history so
+    /// trimming the history never moves the baseline the fill rate runs from.
+    cycle_start: Option<ReadingRecord>,
+    /// Latest known fill rate (cm/day). Carries over a pump-out, projecting the
+    /// new cycle until it is old enough to yield a rate of its own.
+    fill_rate: Option<f64>,
+    /// Device counter of the last applied reading. The device publishes `/read`
+    /// retained, so every (re)subscribe re-delivers the last reading.
+    last_read_no: Option<i64>,
 }
 
 pub async fn run(cfg: Config) -> Result<()> {
@@ -150,6 +159,9 @@ fn load_runtime(cfg: &Config, store: &impl Store) -> Runtime {
                 current,
                 history: p.history,
                 lst_empty,
+                cycle_start: p.cycle_start,
+                fill_rate: p.fill_rate,
+                last_read_no: p.last_read_no,
             }
         }
         Ok(None) => {
@@ -168,6 +180,9 @@ fn seed_runtime(cfg: &Config) -> Runtime {
         current: seed_state(cfg, clock::now_rfc3339()),
         history: Vec::new(),
         lst_empty: cfg.state.lst_empty.clone(),
+        cycle_start: None,
+        fill_rate: None,
+        last_read_no: None,
     }
 }
 
@@ -177,6 +192,9 @@ fn persist(store: &impl Store, cfg: &Config, rt: &Runtime) {
     let snapshot = PersistedState {
         history: rt.history.clone(),
         lst_empty: rt.lst_empty.clone(),
+        cycle_start: rt.cycle_start.clone(),
+        fill_rate: rt.fill_rate,
+        last_read_no: rt.last_read_no,
         last_state: Some(rt.current.clone()),
         calibration: cfg.calibration,
     };
@@ -311,6 +329,10 @@ async fn handle_read(
     rt: &mut Runtime,
     reading: &Reading,
 ) -> Result<()> {
+    if rt.is_redelivery(reading) {
+        debug!(read_no = ?reading.read_no, "ignoring re-delivered reading");
+        return Ok(());
+    }
     rt.apply_reading(cfg, battery, reading, clock::now_rfc3339());
     info!(
         lvl = rt.current.lvl,
@@ -328,10 +350,17 @@ async fn handle_read(
 }
 
 impl Runtime {
-    /// Pure state transition for one reading: detect a pump-out (advancing
-    /// `lstEmpty`), append to history (trimming the oldest past the cap),
-    /// reproject `daysLeft` from the fill rate, and recompute the current
-    /// `/state`. Kept free of I/O so it is unit-testable without the broker.
+    /// Whether this is the last applied reading again (same device counter).
+    fn is_redelivery(&self, reading: &Reading) -> bool {
+        reading.read_no.is_some() && reading.read_no == self.last_read_no
+    }
+
+    /// Pure state transition for one reading: append it to history, settle
+    /// whether the previous reading's sharp drop was a pump-out (starting a new
+    /// fill cycle and advancing `lstEmpty`) or a glitch (dropped), trim the
+    /// history to its cap, reproject `daysLeft` from the cycle's fill rate, and
+    /// recompute the current `/state`. Kept free of I/O so it is unit-testable
+    /// without the broker.
     fn apply_reading(
         &mut self,
         cfg: &Config,
@@ -339,29 +368,28 @@ impl Runtime {
         reading: &Reading,
         now: String,
     ) {
-        let bat = battery.percent(reading.battery_mv);
-        let new_pct = cfg.calibration.pct(reading.level_cm);
-
-        // A sharp fall in fullness versus the last state means the tank was
-        // emptied; reset the pump-out baseline to this reading's time.
-        if history::is_pump_out(self.current.pct, new_pct, cfg.pump_out_drop_pct) {
-            info!(prev_pct = self.current.pct, new_pct, lst_empty = %now, "pump-out detected; resetting lstEmpty");
-            self.lst_empty = now.clone();
-        }
-
+        self.last_read_no = reading.read_no;
         self.history.push(ReadingRecord {
             ts: now.clone(),
             lvl: reading.level_cm,
-            bat,
+            bat: battery.percent(reading.battery_mv),
         });
+        self.resolve_drop(cfg);
         if self.history.len() > cfg.history_max_len {
             let overflow = self.history.len() - cfg.history_max_len;
             self.history.drain(0..overflow);
         }
 
-        // Project days-to-full from the fill rate; keep the prior estimate when
-        // the history can't yet support one.
-        let days_left = history::days_left(&self.history, cfg.calibration.full_dist)
+        let cycle_start = self
+            .cycle_start
+            .get_or_insert_with(|| self.history[0].clone());
+        if let Some(rate) = history::fill_rate(cycle_start, &self.history) {
+            self.fill_rate = Some(rate);
+        }
+        // Keep the prior estimate until any fill rate is known.
+        let days_left = self
+            .fill_rate
+            .and_then(|rate| history::days_left(&self.history, cfg.calibration.full_dist, rate))
             .unwrap_or(self.current.days_left);
 
         self.current = SensorState::compute(
@@ -371,6 +399,36 @@ impl Runtime {
             &statics(cfg, self.lst_empty.clone(), days_left),
             now,
         );
+    }
+
+    /// A sharp fullness drop is only judged once the reading after it arrives:
+    /// if the level stays down the tank was emptied, if it bounces back the low
+    /// reading was a radar glitch and must not reset the fill cycle.
+    fn resolve_drop(&mut self, cfg: &Config) {
+        let n = self.history.len();
+        if n < 3 {
+            return;
+        }
+        let suspect = self.history[n - 2].clone();
+        match history::classify_drop(
+            &self.history[n - 3],
+            &suspect,
+            &self.history[n - 1],
+            &cfg.calibration,
+            cfg.pump_out_drop_pct,
+        ) {
+            Drop::None => {}
+            Drop::Outlier => {
+                warn!(lvl = suspect.lvl, ts = %suspect.ts, "discarding glitch reading");
+                self.history.remove(n - 2);
+            }
+            Drop::PumpOut => {
+                info!(lst_empty = %suspect.ts, "pump-out detected; starting a new fill cycle");
+                self.lst_empty = suspect.ts.clone();
+                self.cycle_start = Some(suspect);
+                self.history.drain(..n - 2);
+            }
+        }
     }
 }
 
@@ -457,6 +515,9 @@ mod tests {
                     bat: 83,
                 }],
                 lst_empty: "2026-06-01T00:00:00+02:00".into(),
+                cycle_start: None,
+                fill_rate: Some(2.5),
+                last_read_no: Some(73045),
                 last_state: Some(prior.clone()),
                 calibration: c.calibration,
             })
@@ -472,40 +533,114 @@ mod tests {
         assert_eq!(rt.history.len(), 1);
     }
 
+    fn feed(rt: &mut Runtime, c: &Config, readings: &[(&str, i64)]) {
+        for (ts, read1) in readings {
+            rt.apply_reading(c, &BatteryCurve::default(), &reading(*read1), (*ts).into());
+        }
+    }
+
     #[test]
-    fn a_reading_sequence_with_a_pump_out_updates_lst_empty() {
+    fn a_retained_reading_redelivered_on_reconnect_is_recognised() {
         let dir = tempfile::tempdir().unwrap();
         let c = cfg(dir.path().to_str().unwrap());
-        let battery = BatteryCurve::default();
+        let mut rt = seed_runtime(&c);
+        let numbered = |read_no: i64| {
+            let payload = format!(
+                r#"{{"sensor":"ae5058","read1":15000,"battery":"3770","readNo":{read_no}}}"#
+            );
+            Reading::parse(payload.as_bytes()).unwrap()
+        };
+
+        assert!(!rt.is_redelivery(&numbered(100)));
+        rt.apply_reading(
+            &c,
+            &BatteryCurve::default(),
+            &numbered(100),
+            "2026-06-08T00:00:00+02:00".into(),
+        );
+        assert!(rt.is_redelivery(&numbered(100)));
+        assert!(!rt.is_redelivery(&numbered(101)));
+    }
+
+    #[test]
+    fn a_pump_out_is_confirmed_by_the_next_reading() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = cfg(dir.path().to_str().unwrap());
         let mut rt = seed_runtime(&c);
         let seeded_empty = rt.lst_empty.clone();
 
-        // A nearly-full reading (50 cm ≈ 93%); fullness rising, so no pump-out.
-        rt.apply_reading(
+        // Nearly full (50 cm ≈ 93%), then a near-empty reading (170 cm ≈ 6%).
+        feed(
+            &mut rt,
             &c,
-            &battery,
-            &reading(5000),
-            "2026-06-08T00:00:00+02:00".into(),
+            &[
+                ("2026-06-08T00:00:00+02:00", 5000),
+                ("2026-06-08T12:00:00+02:00", 5000),
+                ("2026-06-09T00:00:00+02:00", 17000),
+            ],
         );
         assert_eq!(
             rt.lst_empty, seeded_empty,
-            "rising level must not reset lstEmpty"
+            "one low reading isn't proof yet"
         );
 
-        // Then a near-empty reading (170 cm ≈ 6%): an ~87-point drop = pump-out.
-        rt.apply_reading(
+        feed(&mut rt, &c, &[("2026-06-09T06:00:00+02:00", 16950)]);
+        assert_eq!(rt.lst_empty, "2026-06-09T00:00:00+02:00");
+        assert_eq!(rt.current.lst_empty, "2026-06-09T00:00:00+02:00");
+        assert_eq!(rt.history.len(), 2, "the old cycle is dropped");
+    }
+
+    #[test]
+    fn a_single_glitch_neither_resets_the_cycle_nor_stays_in_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = cfg(dir.path().to_str().unwrap());
+        let mut rt = seed_runtime(&c);
+        let seeded_empty = rt.lst_empty.clone();
+
+        feed(
+            &mut rt,
             &c,
-            &battery,
-            &reading(17000),
-            "2026-06-09T00:00:00+02:00".into(),
+            &[
+                ("2026-06-08T00:00:00+02:00", 5000),
+                ("2026-06-08T12:00:00+02:00", 17000),
+                ("2026-06-09T00:00:00+02:00", 4990),
+            ],
         );
-        assert_eq!(
-            rt.lst_empty, "2026-06-09T00:00:00+02:00",
-            "pump-out resets lstEmpty"
+        assert_eq!(rt.lst_empty, seeded_empty);
+        assert!(rt.history.iter().all(|r| r.lvl < 60.0));
+    }
+
+    #[test]
+    fn days_left_follows_the_cycle_and_survives_a_pump_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = cfg(dir.path().to_str().unwrap());
+        let mut rt = seed_runtime(&c);
+
+        // A cycle filling 2 cm/day from 170 cm, one reading a day for 20 days.
+        let cycle: Vec<(String, i64)> = (0..20)
+            .map(|d| {
+                (
+                    format!("2026-06-{:02}T00:00:00+02:00", d + 1),
+                    17000 - 200 * d,
+                )
+            })
+            .collect();
+        for (ts, read1) in &cycle {
+            feed(&mut rt, &c, &[(ts, *read1)]);
+        }
+        // 132 cm smoothed, 92 cm to full at 2 cm/day.
+        assert_eq!(rt.current.days_left, 46);
+
+        // Emptied; the young cycle reuses the previous 2 cm/day: 138 cm to full.
+        feed(
+            &mut rt,
+            &c,
+            &[
+                ("2026-06-21T00:00:00+02:00", 17800),
+                ("2026-06-21T06:00:00+02:00", 17800),
+            ],
         );
-        assert_eq!(
-            rt.current.lst_empty, "2026-06-09T00:00:00+02:00",
-            "computed /state carries the new lstEmpty"
-        );
+        assert_eq!(rt.lst_empty, "2026-06-21T00:00:00+02:00");
+        assert_eq!(rt.current.days_left, 69);
     }
 }

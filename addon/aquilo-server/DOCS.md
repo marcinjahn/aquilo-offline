@@ -52,7 +52,7 @@ Fill in the options:
 | `full_dist` / `empty_dist`    | Tank calibration (cm), driving `pct` and `lvlToFull`.          |
 | `radar_skip` / `radar_repeat` | Radar/radio params published to the sensor node.               |
 | `ping_interval_secs`          | App-level `/ping` cadence (~20 min default).                   |
-| `history_max_len`             | Rolling reading-history cap (drives `daysLeft`).               |
+| `history_max_len`             | Rolling reading-history cap.                                   |
 | `pump_out_drop_pct`           | Fullness drop (pct points) counted as a pump-out (`lstEmpty`). |
 | `log_level`                   | Add-on log verbosity.                                          |
 
@@ -128,12 +128,14 @@ placeholder, not live data. This is normal — don't be alarmed by the numbers b
   `read received; republishing computed state` — after that, `/state` carries live
   `lvl`/`pct`/`bat` and a fresh `lstRead`. Give it up to a day; there's nothing to
   do but wait.
-- **`daysLeft` stays `0` until several readings accumulate.** It's a fill-rate
-  projection over the add-on's _own_ history, which starts empty. The vendor cloud's
-  old estimate is not transferred (we don't have its history) — a new one builds up
-  over the following days.
+- **`daysLeft` stays `0` until the add-on has seen about three days of filling.**
+  It projects the time to full from the average fill rate since the last pump-out,
+  using the add-on's _own_ readings. The vendor cloud's old estimate is not
+  transferred (we don't have its history). After each pump-out, the previous
+  cycle's fill rate is reused until the new cycle is old enough to have its own.
 - **`lstEmpty` stays blank until the first pump-out is detected** — a fullness drop
-  of at least `pump_out_drop_pct` points between two readings. It self-heals the
+  of at least `pump_out_drop_pct` points that still holds on the next reading (a
+  single low reading is treated as a radar glitch and ignored). It self-heals the
   next time the tank is emptied; until then there is genuinely nothing local that
   has observed an emptying.
 - On connect the device may log a single `online → offline → online` cycle as it

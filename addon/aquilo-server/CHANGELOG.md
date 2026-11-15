@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.2
+
+- `daysLeft` is now projected from the average fill rate since the last
+  pump-out, instead of a fit over the whole rolling history. The old fit mixed
+  readings from before and after a pump-out, which flattened the trend into
+  absurd values (thousands of days). Right after a pump-out, the previous cycle's
+  fill rate is reused until the new cycle is about three days old.
+- A pump-out is confirmed only when the next reading stays low. A single low
+  reading (a radar glitch) no longer resets `lstEmpty` and is dropped from the
+  history.
+- The last reading, which the broker re-delivers on every reconnect, is no
+  longer counted again as a new reading.
+
 ## 0.1.1
 
 - `/state` now starts as an all-zero placeholder (`lvl`, `pct`, `bat`,
