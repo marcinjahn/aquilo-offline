@@ -1,5 +1,5 @@
 name: Aquilo offline server
-version: "0.1.2"
+version: "0.1.3"
 slug: aquilo_server
 description: >-
   Local stand-in for the Aquilo vendor cloud. Keeps the receiver connected to

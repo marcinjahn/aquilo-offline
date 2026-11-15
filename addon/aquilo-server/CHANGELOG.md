@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.3
+
+- The add-on no longer gives up when Mosquitto is running but doesn't advertise
+  its MQTT service, which can happen after a backup restarts both add-ons. It now
+  waits up to two minutes for the service, then falls back to the Mosquitto
+  credentials it last received, instead of exiting and staying stopped until
+  restarted by hand.
+
 ## 0.1.2
 
 - `daysLeft` is now projected from the average fill rate since the last

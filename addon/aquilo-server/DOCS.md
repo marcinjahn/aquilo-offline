@@ -156,6 +156,12 @@ add-on returns with its full history and calibration — no separate export step
 
 Keep backups off the Pi, and include this add-on in any scheduled backups.
 
+A backup restarts the add-on, and sometimes Mosquitto too. If Mosquitto comes
+back without advertising its MQTT service, the add-on waits up to two minutes for
+it, then connects with the Mosquitto credentials it last received (kept in
+`/data/broker.env`) and logs a warning. If that warning keeps appearing, restart
+the Mosquitto add-on. Only a first start without the service fails outright.
+
 If you have **no backup and no cloud**, you can still reconstruct a working config:
 the device's identity is recoverable from what it announces on connect. Run the
 `observe` onboarding (no internet needed) to regenerate the IDs/credentials, then

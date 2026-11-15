@@ -29,13 +29,44 @@ fi
 # --- broker connection (our own client) ---
 # Use the auto-provided Mosquitto service credentials. The DEVICE authenticates
 # separately with mqtt_user/mqtt_pass, which you add to Mosquitto's logins (see DOCS).
-if ! bashio::services.available "mqtt"; then
+#
+# Mosquitto can be running yet not advertise the service: after a backup restarts
+# both add-ons it has stayed unadvertised for days. So wait for it for a while, and
+# otherwise fall back to the credentials it last advertised, which Mosquitto keeps
+# stable across restarts. The server retries the connection until the broker is up.
+BROKER_CACHE=/data/broker.env
+SERVICE_WAIT_SECS=120
+SERVICE_POLL_SECS=5
+
+wait_for_mqtt_service() {
+  local waited=0
+  until bashio::services.available "mqtt"; do
+    if ((waited >= SERVICE_WAIT_SECS)); then
+      return 1
+    fi
+    bashio::log.info "MQTT service not available yet; retrying in ${SERVICE_POLL_SECS}s"
+    sleep "${SERVICE_POLL_SECS}"
+    waited=$((waited + SERVICE_POLL_SECS))
+  done
+}
+
+if wait_for_mqtt_service; then
+  BROKER_HOST=$(bashio::services mqtt "host")
+  BROKER_PORT=$(bashio::services mqtt "port")
+  BROKER_USER=$(bashio::services mqtt "username")
+  BROKER_PASS=$(bashio::services mqtt "password")
+  (
+    umask 077
+    printf 'BROKER_HOST=%q\nBROKER_PORT=%q\nBROKER_USER=%q\nBROKER_PASS=%q\n' \
+      "${BROKER_HOST}" "${BROKER_PORT}" "${BROKER_USER}" "${BROKER_PASS}" >"${BROKER_CACHE}"
+  )
+elif bashio::fs.file_exists "${BROKER_CACHE}"; then
+  bashio::log.warning "MQTT service still not available after ${SERVICE_WAIT_SECS}s; using the last known Mosquitto credentials. Restart the Mosquitto add-on if this persists."
+  # shellcheck source=/dev/null
+  source "${BROKER_CACHE}"
+else
   bashio::exit.nok "No MQTT service available. Install and start the official Mosquitto broker add-on."
 fi
-BROKER_HOST=$(bashio::services mqtt "host")
-BROKER_PORT=$(bashio::services mqtt "port")
-BROKER_USER=$(bashio::services mqtt "username")
-BROKER_PASS=$(bashio::services mqtt "password")
 
 bashio::log.info "Connecting to Mosquitto at ${BROKER_HOST}:${BROKER_PORT} as ${BROKER_USER}"
 
